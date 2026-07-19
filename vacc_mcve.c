@@ -102,8 +102,6 @@ typedef struct {
   int           flush_request_atomics;
   char          rma_ordering[20];
 
-  size_t        memory_limit;
-
   enum ARMCII_Strided_methods_e strided_method;
   enum ARMCII_Iov_methods_e     iov_method;
   enum ARMCII_Shr_buf_methods_e shr_buf_method;
@@ -1272,7 +1270,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
 
   ARMCII_GLOBAL_STATE.use_win_allocate = ARMCII_Getenv_bool("ARMCI_USE_WIN_ALLOCATE", 1);
   ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
-  ARMCII_GLOBAL_STATE.memory_limit=ARMCII_Getenv_long("ARMCI_SHM_LIMIT", 0);
   ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
   ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
   ARMCII_GLOBAL_STATE.disable_shm_accumulate=ARMCII_Getenv_bool("ARMCI_DISABLE_SHM_ACC", 0);
@@ -1301,33 +1298,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
 
       printf("  EXPLICIT_NB_PROGRESS   = %s\n", ARMCII_GLOBAL_STATE.explicit_nb_progress ? "ENABLED" : "DISABLED");
 
-      if (ARMCII_GLOBAL_STATE.memory_limit > 0) {
-          size_t limit  = ARMCII_GLOBAL_STATE.memory_limit;
-          char suffix[4] = {0};
-          int    offset = 0;
-          if (limit && !(limit & (limit-1))) {
-            char * bsuffix[5] = {"", "KiB","MiB","GiB","TiB"};
-            for (int i=0; i<4; i++) {
-              if (limit % 1024 == 0) {
-                offset++;
-                limit /= 1024;
-              }
-            }
-            strncpy(suffix, bsuffix[offset], sizeof(suffix));
-          } else {
-            char * dsuffix[5] = {"","KB","MB","GB","TB"};
-            for (int i=0; i<4; i++) {
-              if (limit % 1000 == 0) {
-                offset++;
-                limit /= 1000;
-              }
-            }
-            strncpy(suffix, dsuffix[offset], sizeof(suffix));
-          }
-          printf("  SHM_LIMIT              = %zu %s\n", limit, suffix);
-      } else {
-          printf("  SHM_LIMIT              = %s\n", "UNLIMITED");
-      }
+      printf("  SHM_LIMIT              = %s\n", "UNLIMITED");
 
       if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
           printf("  WINDOW type used       = %s\n", "CREATE");
