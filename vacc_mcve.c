@@ -49,17 +49,9 @@ typedef struct {
   int       size;
 } ARMCI_Group;
 
-void ARMCI_Group_free(ARMCI_Group *group);
-
-int ARMCI_Malloc_group(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group);
-int ARMCI_Free_group(void *ptr, ARMCI_Group *group);
-
 int     PARMCI_Init(void);
 int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
 int     PARMCI_Finalize(void);
-int     PARMCI_Malloc(void **base_ptrs, armci_size_t size);
-int     PARMCI_Free(void *ptr);
-void    PARMCI_AllFence(void);
 int     PARMCI_Get(void *src, void *dst, int size, int target);
 int     PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
 
@@ -89,11 +81,8 @@ typedef struct {
   int           rma_atomicity;
   int           end_to_end_flush;
   int           rma_nocheck;
-  int           disable_shm_accumulate;
-  int           use_same_op;
   int           use_request_atomics;
   int           flush_request_atomics;
-  char          rma_ordering[20];
 
   enum ARMCII_Strided_methods_e strided_method;
   enum ARMCII_Iov_methods_e     iov_method;
@@ -109,19 +98,9 @@ int   ARMCII_Getenv_int(const char *varname, int default_value);
 long  ARMCII_Getenv_long(const char *varname, long default_value);
 void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length);
 
-void ARMCII_Group_init_from_comm(ARMCI_Group *group);
-
-int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
-    int datatype, int overlapping, int same_alloc, int proc, int blocking, armci_hdl_t * handle);
 
 int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
     MPI_Datatype type, int proc, int blocking, armci_hdl_t * handle);
-
-int  ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size,
-                            int datatype, void *scale);
-void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int size);
-
-int ARMCII_Is_win_unified(MPI_Win win);
 
 void    ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func);
 #define unlikely(x_) (x_)
@@ -157,11 +136,7 @@ extern gmr_t *gmr_list;
 
 gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group);
 void   gmr_destroy(gmr_t *mreg, ARMCI_Group *group);
-int    gmr_destroy_all(void);
 gmr_t *gmr_lookup(void *ptr, int proc);
-
-int gmr_get(gmr_t *mreg, void *src, void *dst, int size,
-            int target, armci_hdl_t * handle);
 
 int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
@@ -248,16 +223,6 @@ void ARMCI_Error(const char *msg, int code) {
   MPI_Abort(ARMCI_GROUP_WORLD.comm, code);
 }
 
-void PARMCI_AllFence(void) {
-  gmr_t *cur_mreg = gmr_list;
-
-  while (cur_mreg) {
-    MPI_Win_flush_all(cur_mreg->window);   /* inlined gmr_flushall(local_only=0) */
-    cur_mreg = cur_mreg->next;
-  }
-  return;
-}
-
 int ARMCII_Getenv_bool(const char *varname, int default_value) {
   const char *var = getenv(varname);
 
@@ -305,124 +270,8 @@ void ARMCII_Getenv_char(char * output, const char *varname, const char *default_
   }
 }
 
-int ARMCII_Is_win_unified(MPI_Win win)
-{
-  void    *attr_ptr;
-  int      attr_flag;
-
-  MPI_Win_get_attr(win, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
-  if (attr_flag) {
-    int * attr_val = (int*)attr_ptr;
-    if ( (*attr_val)==MPI_WIN_UNIFIED ) {
-      return 1;
-    } else if ( (*attr_val)==MPI_WIN_UNIFIED ) {
-      return 0;
-    } else {
-      return -1;
-    }
-  } else {
-    return -1;
-  }
-}
-
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
-
-void ARMCII_Group_init_from_comm(ARMCI_Group *group) {
-  if (group->comm != MPI_COMM_NULL) {
-    MPI_Comm_size(group->comm, &group->size);
-    MPI_Comm_rank(group->comm, &group->rank);
-
-  } else {
-    group->rank = -1;
-    group->size =  0;
-  }
-
-  if (ARMCII_GLOBAL_STATE.noncollective_groups && group->comm != MPI_COMM_NULL)
-    MPI_Comm_dup(group->comm, &group->noncoll_pgroup_comm);
-  else
-    group->noncoll_pgroup_comm = MPI_COMM_NULL;
-
-  if (ARMCII_GLOBAL_STATE.cache_rank_translation) {
-    if (group->comm != MPI_COMM_NULL) {
-      int      *ranks, i;
-      MPI_Group world_group, sub_group;
-
-      group->abs_to_grp = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
-      group->grp_to_abs = malloc(sizeof(int)*group->size);
-      ranks = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
-
-      ARMCII_Assert(group->abs_to_grp != NULL && group->grp_to_abs != NULL && ranks != NULL);
-
-      for (i = 0; i < ARMCI_GROUP_WORLD.size; i++)
-        ranks[i] = i;
-
-      MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
-      MPI_Comm_group(group->comm, &sub_group);
-
-      MPI_Group_translate_ranks(sub_group, group->size, ranks, world_group, group->grp_to_abs);
-      MPI_Group_translate_ranks(world_group, ARMCI_GROUP_WORLD.size, ranks, sub_group, group->abs_to_grp);
-
-      MPI_Group_free(&world_group);
-      MPI_Group_free(&sub_group);
-
-      free(ranks);
-    }
-  }
-
-  else {
-    group->abs_to_grp = NULL;
-    group->grp_to_abs = NULL;
-  }
-}
-
-void ARMCI_Group_free(ARMCI_Group *group) {
-  if (group->comm != MPI_COMM_NULL) {
-    MPI_Comm_free(&group->comm);
-
-    if (ARMCII_GLOBAL_STATE.noncollective_groups)
-      MPI_Comm_free(&group->noncoll_pgroup_comm);
-  }
-
-  if (group->abs_to_grp != NULL)
-    free(group->abs_to_grp);
-  if (group->grp_to_abs != NULL)
-    free(group->grp_to_abs);
-
-  group->rank = -1;
-  group->size = 0;
-}
-
-int PARMCI_Malloc(void **ptr_arr, armci_size_t bytes) {
-  return ARMCI_Malloc_group(ptr_arr, bytes, &ARMCI_GROUP_WORLD);
-}
-
-int PARMCI_Free(void *ptr) {
-  return ARMCI_Free_group(ptr, &ARMCI_GROUP_WORLD);
-}
-
-int ARMCI_Malloc_group(void **base_ptrs, armci_size_t size, ARMCI_Group *group) {
-  int i;
-  gmr_t *mreg;
-
-  mreg = gmr_create(size, base_ptrs, group);
-
-  return 0;
-}
-
-int ARMCI_Free_group(void *ptr, ARMCI_Group *group) {
-  gmr_t *mreg;
-
-  if (ptr != NULL) {
-    mreg = gmr_lookup(ptr, ARMCI_GROUP_WORLD.rank);
-    ARMCII_Assert_msg(mreg != NULL, "Invalid shared pointer");
-  } else {
-    mreg = NULL;
-  }
-  gmr_destroy(mreg, group);
-
-  return 0;
-}
 
 gmr_t *gmr_list = NULL;
 
@@ -499,18 +348,6 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
       MPI_Info_set(win_info, "accumulate_max_bytes", max_local_size_string);
   }
 
-  if (ARMCII_GLOBAL_STATE.disable_shm_accumulate) {
-      MPI_Info_set(win_info, "disable_shm_accumulate", "true");
-  }
-
-  if (ARMCII_GLOBAL_STATE.use_same_op) {
-      MPI_Info_set(win_info, "accumulate_ops", "same_op");
-  }
-
-  if (strlen(ARMCII_GLOBAL_STATE.rma_ordering) > 0) {
-      MPI_Info_set(win_info, "accumulate_ordering", ARMCII_GLOBAL_STATE.rma_ordering);
-  }
-
   MPI_Info_set(win_info, "epochs_used", "lockall");
 
   if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
@@ -570,7 +407,17 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
                    mreg->window);
 
   {
-    const int unified = ARMCII_Is_win_unified(mreg->window);
+    int unified;
+    { /* inlined ARMCII_Is_win_unified(mreg->window) */
+      void *attr_ptr; int attr_flag;
+      MPI_Win_get_attr(mreg->window, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
+      if (attr_flag) {
+        int *attr_val = (int*)attr_ptr;
+        if      ((*attr_val)==MPI_WIN_UNIFIED) unified = 1;
+        else if ((*attr_val)==MPI_WIN_UNIFIED) unified = 0;
+        else                                   unified = -1;
+      } else unified = -1;
+    }
     const int print = ARMCII_GLOBAL_STATE.verbose;
     if (unified == 1) {
         mreg->unified = true;
@@ -666,17 +513,6 @@ void gmr_destroy(gmr_t *mreg, ARMCI_Group *group) {
   free(mreg);
 }
 
-int gmr_destroy_all(void) {
-  int count = 0;
-
-  while (gmr_list != NULL) {
-    gmr_destroy(gmr_list, &gmr_list->group);
-    count++;
-  }
-
-  return count;
-}
-
 gmr_t *gmr_lookup(void *ptr, int proc) {
   gmr_t *mreg;
 
@@ -697,12 +533,6 @@ gmr_t *gmr_lookup(void *ptr, int proc) {
   }
 
   return mreg;
-}
-
-int gmr_get(gmr_t *mreg, void *src, void *dst, int size, int proc, armci_hdl_t * handle)
-{
-  ARMCII_Assert_msg(dst != NULL, "Invalid local address");
-  return gmr_get_typed(mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, proc, handle);
 }
 
 int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
@@ -842,7 +672,8 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
   }
 
   else if (dst_mreg == NULL) {
-    gmr_get(src_mreg, src, dst, size, target, NULL  );
+    ARMCII_Assert_msg(dst != NULL, "Invalid local address");
+    gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, target, NULL);
     gmr_flush(src_mreg, target, 0);
   }
 
@@ -852,7 +683,8 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
     MPI_Alloc_mem(size, MPI_INFO_NULL, &dst_buf);
     ARMCII_Assert(dst_buf != NULL);
 
-    gmr_get(src_mreg, src, dst_buf, size, target, NULL  );
+    ARMCII_Assert_msg(dst_buf != NULL, "Invalid local address");
+    gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst_buf, size, MPI_BYTE, target, NULL);
     gmr_flush(src_mreg, target, 0);
 
     memmove(dst, dst_buf, size);
@@ -861,26 +693,6 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
   }
 
   return 0;
-}
-
-int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
-                           int datatype, int overlapping, int same_alloc, int proc,
-                           int blocking, armci_hdl_t * handle)
-{
-
-  MPI_Datatype type;
-  int type_count, type_size;
-
-  if (op == ARMCII_OP_ACC) {
-    type = MPI_DOUBLE; MPI_Type_size(type, &type_size);   /* inlined ARMCII_Acc_type_translate (ARMCI_ACC_DBL) */
-  } else {
-    type = MPI_BYTE;
-    MPI_Type_size(type, &type_size);
-  }
-  type_count = size/type_size;
-  ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of type size");
-
-  return ARMCII_Iov_op_datatype(op, src, dst, count, type_count, type, proc, blocking, handle);
 }
 
 int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
@@ -992,92 +804,89 @@ int PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int p
 {
   for (int v = 0; v < iov_len; v++) {
     void **src_buf;
-    int    overlapping, same_alloc;
 
     if (iov[v].ptr_array_len == 0) continue;
     if (iov[v].bytes == 0) continue;
 
-    overlapping = 0; same_alloc = 1;   /* IOV_CHECKS disabled */
+    { /* inlined ARMCII_Buf_prepare_acc_vec(iov[v].src_ptr_array, &src_buf, ...) */
+      void **orig_bufs = iov[v].src_ptr_array;
+      int count = iov[v].ptr_array_len;
+      int size = iov[v].bytes;
+      void **new_bufs;
+      int i, scaled;
 
-    ARMCII_Buf_prepare_acc_vec(iov[v].src_ptr_array, &src_buf, iov[v].ptr_array_len, iov[v].bytes, datatype, scale);
-    ARMCII_Iov_op_dispatch(ARMCII_OP_ACC, src_buf, iov[v].dst_ptr_array, iov[v].ptr_array_len, iov[v].bytes, datatype,
-                           overlapping, same_alloc, proc, 1  , NULL);
-    ARMCII_Buf_finish_acc_vec(iov[v].src_ptr_array, src_buf, iov[v].ptr_array_len, iov[v].bytes);
+      new_bufs = malloc((count+1)*sizeof(void*));
+      ARMCII_Assert(new_bufs != NULL);
+      new_bufs[count] = NULL;
+
+      scaled = (fabs(*((double*)scale) - 1.0) < DBL_EPSILON) ? 0 : 1;   /* inlined ARMCII_Buf_acc_is_scaled (ARMCI_ACC_DBL) */
+
+      if (scaled) {
+        char *contig;
+        MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
+        ARMCII_Assert(contig != NULL);
+        new_bufs[count] = contig;
+
+        for (i = 0; i < count; i++) {
+          new_bufs[i] = contig + (MPI_Aint)i*size;
+          { /* inlined ARMCII_Buf_acc_scale (ARMCI_ACC_DBL) */
+            int nelem = size / (int)sizeof(double);
+            double *s_in = (double*) orig_bufs[i], *s_out = (double*) new_bufs[i];
+            const double s = *((double*) scale);
+            for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
+          }
+        }
+      } else {
+        for (i = 0; i < count; i++) {
+          gmr_t *mreg = NULL;
+
+          if (ARMCII_GLOBAL_STATE.shr_buf_method != ARMCII_SHR_BUF_NOGUARD)
+            mreg = gmr_lookup(orig_bufs[i], ARMCI_GROUP_WORLD.rank);
+
+          new_bufs[i] = orig_bufs[i];
+
+          if (mreg != NULL) {
+            MPI_Alloc_mem(size, MPI_INFO_NULL, &new_bufs[i]);
+            ARMCII_Assert(new_bufs[i] != NULL);
+            memmove(new_bufs[i], orig_bufs[i], size);
+          }
+        }
+      }
+
+      src_buf = new_bufs;
+    }
+
+    { /* inlined ARMCII_Iov_op_dispatch(ARMCII_OP_ACC, src_buf, ...) */
+      MPI_Datatype type = MPI_DOUBLE;   /* ARMCI_ACC_DBL */
+      int type_count, type_size;
+      MPI_Type_size(type, &type_size);
+      type_count = iov[v].bytes/type_size;
+      ARMCII_Assert_msg(iov[v].bytes % type_size == 0, "Transfer size is not a multiple of type size");
+      ARMCII_Iov_op_datatype(ARMCII_OP_ACC, src_buf, iov[v].dst_ptr_array, iov[v].ptr_array_len,
+                             type_count, type, proc, 1, NULL);
+    }
+
+    { /* inlined ARMCII_Buf_finish_acc_vec(iov[v].src_ptr_array, src_buf, ...) */
+      void **orig_bufs = iov[v].src_ptr_array;
+      void **new_bufs  = src_buf;
+      int count = iov[v].ptr_array_len;
+      int i;
+
+      if (new_bufs[count] != NULL) {
+        MPI_Free_mem(new_bufs[count]);
+      } else {
+        for (i = 0; i < count; i++) {
+          if (orig_bufs[i] != new_bufs[i]) {
+            MPI_Free_mem(new_bufs[i]);
+          }
+        }
+      }
+
+      free(new_bufs);
+    }
   }
 
   return 0;
-}
-
-int ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size,
-                            int datatype, void *scale) {
-
-  void **new_bufs;
-  int i, scaled, num_moved = 0;
-
-  new_bufs = malloc((count+1)*sizeof(void*));
-  ARMCII_Assert(new_bufs != NULL);
-  new_bufs[count] = NULL;
-
-  scaled = (fabs(*((double*)scale) - 1.0) < DBL_EPSILON) ? 0 : 1;   /* inlined ARMCII_Buf_acc_is_scaled (ARMCI_ACC_DBL) */
-
-  if (scaled) {
-
-    char *contig;
-    MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-    ARMCII_Assert(contig != NULL);
-    new_bufs[count] = contig;
-
-    for (i = 0; i < count; i++) {
-      new_bufs[i] = contig + (MPI_Aint)i*size;
-      { /* inlined ARMCII_Buf_acc_scale (ARMCI_ACC_DBL) */
-        int nelem = size / (int)sizeof(double);
-        double *s_in = (double*) orig_bufs[i], *s_out = (double*) new_bufs[i];
-        const double s = *((double*) scale);
-        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
-      }
-    }
-  } else {
-    for (i = 0; i < count; i++) {
-      gmr_t *mreg = NULL;
-
-      if (ARMCII_GLOBAL_STATE.shr_buf_method != ARMCII_SHR_BUF_NOGUARD)
-        mreg = gmr_lookup(orig_bufs[i], ARMCI_GROUP_WORLD.rank);
-
-      new_bufs[i] = orig_bufs[i];
-
-      if (mreg != NULL) {
-
-        MPI_Alloc_mem(size, MPI_INFO_NULL, &new_bufs[i]);
-        ARMCII_Assert(new_bufs[i] != NULL);
-
-        memmove(new_bufs[i], orig_bufs[i], size);
-      }
-
-      if (new_bufs[i] == orig_bufs[i])
-        num_moved++;
-    }
-  }
-
-  *new_bufs_ptr = new_bufs;
-
-  return num_moved;
-}
-
-void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int size) {
-  int i;
-
-  if (new_bufs[count] != NULL) {
-
-    MPI_Free_mem(new_bufs[count]);
-  } else {
-    for (i = 0; i < count; i++) {
-      if (orig_bufs[i] != new_bufs[i]) {
-        MPI_Free_mem(new_bufs[i]);
-      }
-    }
-  }
-
-  free(new_bufs);
 }
 
 int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
@@ -1097,7 +906,54 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   }
 
   MPI_Comm_dup(comm, &ARMCI_GROUP_WORLD.comm);
-  ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD);
+  { /* inlined ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD) */
+    ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+    if (group->comm != MPI_COMM_NULL) {
+      MPI_Comm_size(group->comm, &group->size);
+      MPI_Comm_rank(group->comm, &group->rank);
+
+    } else {
+      group->rank = -1;
+      group->size =  0;
+    }
+
+    if (ARMCII_GLOBAL_STATE.noncollective_groups && group->comm != MPI_COMM_NULL)
+      MPI_Comm_dup(group->comm, &group->noncoll_pgroup_comm);
+    else
+      group->noncoll_pgroup_comm = MPI_COMM_NULL;
+
+    if (ARMCII_GLOBAL_STATE.cache_rank_translation) {
+      if (group->comm != MPI_COMM_NULL) {
+        int      *ranks, i;
+        MPI_Group world_group, sub_group;
+
+        group->abs_to_grp = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
+        group->grp_to_abs = malloc(sizeof(int)*group->size);
+        ranks = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
+
+        ARMCII_Assert(group->abs_to_grp != NULL && group->grp_to_abs != NULL && ranks != NULL);
+
+        for (i = 0; i < ARMCI_GROUP_WORLD.size; i++)
+          ranks[i] = i;
+
+        MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
+        MPI_Comm_group(group->comm, &sub_group);
+
+        MPI_Group_translate_ranks(sub_group, group->size, ranks, world_group, group->grp_to_abs);
+        MPI_Group_translate_ranks(world_group, ARMCI_GROUP_WORLD.size, ranks, sub_group, group->abs_to_grp);
+
+        MPI_Group_free(&world_group);
+        MPI_Group_free(&sub_group);
+
+        free(ranks);
+      }
+    }
+
+    else {
+      group->abs_to_grp = NULL;
+      group->grp_to_abs = NULL;
+    }
+  }
   ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
 
   ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
@@ -1183,10 +1039,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
   ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
   ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
-  ARMCII_GLOBAL_STATE.disable_shm_accumulate=ARMCII_Getenv_bool("ARMCI_DISABLE_SHM_ACC", 0);
-  ARMCII_GLOBAL_STATE.use_same_op=ARMCII_Getenv_bool("ARMCI_USE_SAME_OP", 0);
   ARMCII_GLOBAL_STATE.rma_atomicity=ARMCII_Getenv_bool("ARMCI_RMA_ATOMICITY", 1);
-  ARMCII_Getenv_char(ARMCII_GLOBAL_STATE.rma_ordering, "ARMCI_RMA_ORDERING", "rar,raw,war,waw", sizeof(ARMCII_GLOBAL_STATE.rma_ordering)-1);
   ARMCII_GLOBAL_STATE.end_to_end_flush=ARMCII_Getenv_bool("ARMCI_NO_FLUSH_LOCAL", 0);
   ARMCII_GLOBAL_STATE.rma_nocheck=ARMCII_Getenv_bool("ARMCI_RMA_NOCHECK", 1);
   ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", 1);
@@ -1246,12 +1099,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       printf("  USE_REQUEST_ATOMICS    = %s\n", ARMCII_GLOBAL_STATE.use_request_atomics    ? "TRUE" : "FALSE");
       printf("  FLUSH_REQUEST_ATOMICS  = %s\n", ARMCII_GLOBAL_STATE.flush_request_atomics  ? "TRUE" : "FALSE");
       printf("  USE_RMA_REQUESTS       = %s\n", "TRUE");
-
       printf("  USE_ALLOC_SHM          = %s\n", ARMCII_GLOBAL_STATE.use_alloc_shm          ? "TRUE" : "FALSE");
-      printf("  DISABLE_SHM_ACC        = %s\n", ARMCII_GLOBAL_STATE.disable_shm_accumulate ? "TRUE" : "FALSE");
-      printf("  USE_SAME_OP            = %s\n", ARMCII_GLOBAL_STATE.use_same_op            ? "TRUE" : "FALSE");
-      printf("  RMA_ORDERING           = %s\n", ARMCII_GLOBAL_STATE.rma_ordering);
-
       printf("  IOV_CHECKS             = %s\n", ARMCII_GLOBAL_STATE.iov_checks             ? "TRUE" : "FALSE");
       printf("  SHR_BUF_METHOD         = %s\n", ARMCII_Shr_buf_methods_str[ARMCII_GLOBAL_STATE.shr_buf_method]);
       printf("  NONCOLLECTIVE_GROUPS   = %s\n", ARMCII_GLOBAL_STATE.noncollective_groups   ? "TRUE" : "FALSE");
@@ -1284,13 +1132,33 @@ int PARMCI_Finalize(void) {
     return 0;
   }
 
-  nfreed = gmr_destroy_all();
+  nfreed = 0;   /* inlined gmr_destroy_all() */
+  while (gmr_list != NULL) {
+    gmr_destroy(gmr_list, &gmr_list->group);
+    nfreed++;
+  }
 
   if (nfreed > 0 && ARMCI_GROUP_WORLD.rank == 0) {
     ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
   }
 
-  ARMCI_Group_free(&ARMCI_GROUP_WORLD);
+  { /* inlined ARMCI_Group_free(&ARMCI_GROUP_WORLD) */
+    ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+    if (group->comm != MPI_COMM_NULL) {
+      MPI_Comm_free(&group->comm);
+
+      if (ARMCII_GLOBAL_STATE.noncollective_groups)
+        MPI_Comm_free(&group->noncoll_pgroup_comm);
+    }
+
+    if (group->abs_to_grp != NULL)
+      free(group->abs_to_grp);
+    if (group->grp_to_abs != NULL)
+      free(group->grp_to_abs);
+
+    group->rank = -1;
+    group->size = 0;
+  }
 
   return 0;
 }
@@ -1445,7 +1313,9 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
 
      assert(ndim<=MAXDIMS);
      for(i=0;i<ndim;i++)bytes*=dims[i];
-     rc = PARMCI_Malloc(a, bytes);
+     /* inlined PARMCI_Malloc -> ARMCI_Malloc_group -> gmr_create */
+     gmr_create(bytes, a, &ARMCI_GROUP_WORLD);
+     rc = 0;
      assert(rc==0);
      assert(a[me]);
 
@@ -1455,7 +1325,18 @@ void destroy_array(void *ptr[])
 {
     int rc;
     MPI_Barrier(MPI_COMM_WORLD);
-    rc = PARMCI_Free(ptr[me]);
+    { /* inlined PARMCI_Free -> ARMCI_Free_group */
+      gmr_t *mreg;
+      void *fptr = ptr[me];
+      if (fptr != NULL) {
+        mreg = gmr_lookup(fptr, ARMCI_GROUP_WORLD.rank);
+        ARMCII_Assert_msg(mreg != NULL, "Invalid shared pointer");
+      } else {
+        mreg = NULL;
+      }
+      gmr_destroy(mreg, &ARMCI_GROUP_WORLD);
+      rc = 0;
+    }
     assert(rc==0);
 }
 
@@ -1538,7 +1419,13 @@ void test_vector_acc()
 
         }
 
-        PARMCI_AllFence();
+        { /* inlined PARMCI_AllFence() */
+          gmr_t *cur_mreg = gmr_list;
+          while (cur_mreg) {
+            MPI_Win_flush_all(cur_mreg->window);
+            cur_mreg = cur_mreg->next;
+          }
+        }
         MPI_Barrier(MPI_COMM_WORLD);
 
 	assert(!PARMCI_Get((double*)b[proc], c, bytes, proc));
