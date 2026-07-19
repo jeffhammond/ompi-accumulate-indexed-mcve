@@ -940,201 +940,13 @@ static inline void ctree_rotate_right(ctree_t node);
 
 const ctree_t CTREE_EMPTY = NULL;
 
-ctree_t ctree_locate(ctree_t root, uint8_t *lo, uint8_t *hi) {
-  ctree_t cur = root;
 
-  while (cur != NULL) {
-    if (   (lo >= cur->lo && lo <= cur->hi)
-        || (hi >= cur->lo && hi <= cur->hi)
-        || (lo <  cur->lo && hi >  cur->hi))
-      break;
 
-    else if (lo < cur->lo)
-      cur = cur->left;
 
-    else
-      cur = cur->right;
-  }
 
-  return cur;
-}
 
-int ctree_insert(ctree_t *root, uint8_t *lo, uint8_t *hi) {
-  ctree_t cur;
-  ctree_t new_node = (ctree_t) malloc(sizeof(struct ctree_node_s));
 
-  new_node->lo     = lo;
-  new_node->hi     = hi;
-  new_node->height = 1;
-  new_node->parent = NULL;
-  new_node->left   = NULL;
-  new_node->right  = NULL;
 
-  cur = *root;
-
-  if (cur == NULL) {
-    *root = new_node;
-    return 0;
-  }
-
-  for (;;) {
-
-    if (   (lo >= cur->lo && lo <= cur->hi)
-        || (hi >= cur->lo && hi <= cur->hi)
-        || (lo <  cur->lo && hi >  cur->hi)) {
-      ARMCII_Dbg_print(DEBUG_CAT_CTREE, "Conflict inserting [%p, %p] with [%p, %p]\n", lo, hi, cur->lo, cur->hi);
-      free(new_node);
-      return 1;
-    }
-
-    else if (lo < cur->lo) {
-      if (cur->left == NULL) {
-        new_node->parent = cur;
-        cur->left = new_node;
-        *root = ctree_balance(cur);
-        return 0;
-      } else {
-        cur = cur->left;
-      }
-    }
-
-    else   {
-      if (cur->right == NULL) {
-        new_node->parent = cur;
-        cur->right = new_node;
-        *root = ctree_balance(cur);
-        return 0;
-      } else {
-        cur = cur->right;
-      }
-    }
-  }
-}
-
-static inline void ctree_rotate_left(ctree_t node) {
-  ctree_t old_root = node->parent;
-
-  ARMCII_Assert(old_root->right == node);
-
-  node->parent     = old_root->parent;
-
-  if (node->parent != NULL) {
-    if (node->parent->left == old_root)
-      node->parent->left = node;
-    else
-      node->parent->right = node;
-  }
-
-  old_root->right         = node->left;
-  if (old_root->right != NULL)
-    old_root->right->parent = old_root;
-
-  node->left              = old_root;
-  node->left->parent      = node;
-
-  old_root->height = MAX(ctree_node_height(old_root->left), ctree_node_height(old_root->right)) + 1;
-  node->height     = MAX(ctree_node_height(node->left), ctree_node_height(node->right)) + 1;
-}
-
-static inline void ctree_rotate_right(ctree_t node) {
-  ctree_t old_root = node->parent;
-
-  ARMCII_Assert(old_root->left == node);
-
-  node->parent     = old_root->parent;
-
-  if (node->parent != NULL) {
-    if (node->parent->left == old_root)
-      node->parent->left = node;
-    else
-      node->parent->right = node;
-  }
-
-  old_root->left  = node->right;
-  if (old_root->left != NULL)
-    old_root->left->parent = old_root;
-
-  node->right         = old_root;
-  node->right->parent = node;
-
-  old_root->height = MAX(ctree_node_height(old_root->left), ctree_node_height(old_root->right)) + 1;
-  node->height     = MAX(ctree_node_height(node->left), ctree_node_height(node->right)) + 1;
-}
-
-static inline int ctree_node_height(ctree_t node) {
-  if (node == NULL)
-    return 0;
-  else
-    return node->height;
-}
-
-static ctree_t ctree_balance(ctree_t node) {
-  ctree_t root = node;
-
-  while (node != NULL) {
-    int height_l = ctree_node_height(node->left);
-    int height_r = ctree_node_height(node->right);
-
-    node->height = MAX(ctree_node_height(node->left), ctree_node_height(node->right)) + 1;
-
-    if (abs(height_l - height_r) >= 2) {
-
-      if (height_l - height_r == -2) {
-        int height_r_l = ctree_node_height(node->right->left);
-        int height_r_r = ctree_node_height(node->right->right);
-
-        if (height_r_l - height_r_r <= 0) {
-          node = node->right;
-          ctree_rotate_left(node);
-        }
-
-        else {
-          ctree_rotate_right(node->right->left);
-          node = node->right;
-          ctree_rotate_left(node);
-        }
-
-      } else if (height_l - height_r == 2) {
-        int height_l_l = ctree_node_height(node->left->left);
-        int height_l_r = ctree_node_height(node->left->right);
-
-        if (height_l_l - height_l_r >= 0) {
-          node = node->left;
-          ctree_rotate_right(node);
-        }
-
-        else {
-          ctree_rotate_left(node->left->right);
-          node = node->left;
-          ctree_rotate_right(node);
-        }
-
-      } else {
-        ARMCII_Error("CTree invariant violated, height difference of %d is too large", height_l - height_r);
-      }
-    }
-
-    root = node;
-    node = node->parent;
-  }
-
-  return root;
-}
-
-static void ctree_destroy_rec(ctree_t root) {
-  if (root == NULL) return;
-
-  ctree_destroy_rec(root->left);
-  ctree_destroy_rec(root->right);
-
-  free(root);
-}
-
-void ctree_destroy(ctree_t *root) {
-  ctree_destroy_rec(*root);
-
-  *root = NULL;
-}
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1574,11 +1386,6 @@ gmr_t *gmr_lookup(void *ptr, int proc) {
   return mreg;
 }
 
-int gmr_put(gmr_t *mreg, void *src, void *dst, int size, int proc, armci_hdl_t * handle)
-{
-  ARMCII_Assert_msg(src != NULL, "Invalid local address");
-  return gmr_put_typed(mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, proc, handle);
-}
 
 int gmr_put_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
@@ -1694,12 +1501,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
   return 0;
 }
 
-int gmr_accumulate(gmr_t *mreg, void *src, void *dst, int count, MPI_Datatype type,
-                   int proc, armci_hdl_t * handle)
-{
-  ARMCII_Assert_msg(src != NULL, "Invalid local address");
-  return gmr_accumulate_typed(mreg, src, count, type, dst, count, type, proc, handle);
-}
 
 int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                          void *dst, int dst_count, MPI_Datatype dst_type,
@@ -1880,59 +1681,7 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
 #include <stdlib.h>
 #include <limits.h>
 
-int ARMCII_Iov_check_overlap(void **ptrs, int count, int size) {
-  int i;
-  ctree_t ctree = CTREE_EMPTY;
 
-  if (!ARMCII_GLOBAL_STATE.iov_checks) return 0;
-
-  for (i = 0; i < count; i++) {
-    int conflict = ctree_insert(&ctree, ptrs[i], ((uint8_t*)ptrs[i]) + size - 1);
-
-    if (conflict) {
-      ctree_t cnode = ctree_locate(ctree, ptrs[i], ((uint8_t*)ptrs[i]) + size - 1);
-
-      ARMCII_Dbg_print(DEBUG_CAT_IOV, "IOV regions overlap: [%p, %p] - [%p, %p]\n",
-          ptrs[i], ((uint8_t*)ptrs[i]) + size - 1, cnode->lo, cnode->hi);
-
-      ctree_destroy(&ctree);
-      return 1;
-    }
-  }
-
-  ctree_destroy(&ctree);
-
-  return 0;
-}
-
-int ARMCII_Iov_check_same_allocation(void **ptrs, int count, int proc) {
-  int i;
-  gmr_t *mreg;
-  void *base, *extent;
-
-  if (!ARMCII_GLOBAL_STATE.iov_checks) return 1;
-
-  mreg = gmr_lookup(ptrs[0], proc);
-
-  if (mreg == NULL) {
-    for (i = 1; i < count; i++) {
-      mreg = gmr_lookup(ptrs[i], proc);
-      if (mreg != NULL)
-        return 0;
-    }
-  }
-
-  else {
-    base   = mreg->slices[proc].base;
-    extent = ((uint8_t*) base) + mreg->slices[proc].size;
-
-    for (i = 1; i < count; i++)
-      if ( !(ptrs[i] >= base && ptrs[i] < extent) )
-        return 0;
-  }
-
-  return 1;
-}
 
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
                            int datatype, int overlapping, int same_alloc, int proc,
@@ -1951,86 +1700,9 @@ int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int coun
   type_count = size/type_size;
   ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of type size");
 
-  if (overlapping || !same_alloc || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_CONSRV) {
-    if (overlapping) ARMCII_Warning("IOV remote buffers overlap\n");
-    if (!same_alloc) ARMCII_Warning("IOV remote buffers are not within the same allocation\n");
-
-    return ARMCII_Iov_op_batched(op, src, dst, count, type_count, type, proc, 1  , 1  , handle);
-  }
-
-  else if (   ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_DIRECT
-           || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_AUTO  ) {
-    return ARMCII_Iov_op_datatype(op, src, dst, count, type_count, type, proc, blocking, handle);
-
-  } else if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_BATCHED) {
-    return ARMCII_Iov_op_batched(op, src, dst, count, type_count, type, proc, 0  , blocking, handle);
-
-  } else {
-    ARMCII_Error("unknown iov method (%d)\n", ARMCII_GLOBAL_STATE.iov_method);
-    return 1;
-  }
+  return ARMCII_Iov_op_datatype(op, src, dst, count, type_count, type, proc, blocking, handle);
 }
 
-int ARMCII_Iov_op_batched(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
-    MPI_Datatype type, int proc, int consrv, int blocking, armci_hdl_t * handle) {
-
-  int i;
-  int flush_local = 1;
-  gmr_t *mreg;
-  void *shr_ptr;
-
-  switch(op) {
-    case ARMCII_OP_ACC:
-    case ARMCII_OP_PUT:
-      shr_ptr = dst[0];
-      break;
-    case ARMCII_OP_GET:
-      shr_ptr = src[0];
-      break;
-    default:
-      ARMCII_Error("unknown operation (%d)", op);
-      return 1;
-  }
-
-  mreg = gmr_lookup(shr_ptr, proc);
-  ARMCII_Assert_msg(mreg != NULL, "Invalid remote pointer");
-
-  for (i = 0; i < count; i++) {
-
-    if ( blocking && i > 0 &&
-        ( consrv ||
-         ( ARMCII_GLOBAL_STATE.iov_batched_limit > 0 && i % ARMCII_GLOBAL_STATE.iov_batched_limit == 0)
-        )
-       )
-    {
-      gmr_flush(mreg, proc, flush_local);
-    }
-
-    switch(op) {
-      case ARMCII_OP_PUT:
-        gmr_put(mreg, src[i], dst[i], elem_count, proc, handle);
-        flush_local = 1;
-        break;
-      case ARMCII_OP_GET:
-        gmr_get(mreg, src[i], dst[i], elem_count, proc, handle);
-        flush_local = 0;
-        break;
-      case ARMCII_OP_ACC:
-        gmr_accumulate(mreg, src[i], dst[i], elem_count, type, proc, handle);
-        flush_local = 1;
-        break;
-      default:
-        ARMCII_Error("unknown operation (%d)", op);
-        return 1;
-    }
-  }
-
-  if (blocking) {
-    gmr_flush(mreg, proc, flush_local);
-  }
-
-  return 0;
-}
 
 int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
                            MPI_Datatype type, int proc, int blocking, armci_hdl_t * handle)
@@ -2146,8 +1818,7 @@ int PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int p
     if (iov[v].ptr_array_len == 0) continue;
     if (iov[v].bytes == 0) continue;
 
-    overlapping = ARMCII_Iov_check_overlap(iov[v].dst_ptr_array, iov[v].ptr_array_len, iov[v].bytes);
-    same_alloc  = ARMCII_Iov_check_same_allocation(iov[v].dst_ptr_array, iov[v].ptr_array_len, proc);
+    overlapping = 0; same_alloc = 1;   /* IOV_CHECKS disabled */
 
     ARMCII_Buf_prepare_acc_vec(iov[v].src_ptr_array, &src_buf, iov[v].ptr_array_len, iov[v].bytes, datatype, scale);
     ARMCII_Iov_op_dispatch(ARMCII_OP_ACC, src_buf, iov[v].dst_ptr_array, iov[v].ptr_array_len, iov[v].bytes, datatype,
