@@ -123,8 +123,6 @@ void ARMCII_Getenv_char(char * output, const char *varname, const char *default_
 int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
 
-void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *type, int *type_size);
-
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
     int datatype, int overlapping, int same_alloc, int proc, int blocking, armci_hdl_t * handle);
 
@@ -135,7 +133,6 @@ int  ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int coun
                             int datatype, void *scale);
 void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int size);
 
-int  ARMCII_Buf_acc_is_scaled(int datatype, void *scale);
 void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale);
 
 int ARMCII_Is_win_unified(MPI_Win win);
@@ -258,11 +255,6 @@ int ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank) {
     return -1;
   else
     return group_rank;
-}
-
-void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *mpi_type, int *type_size) {
-    *mpi_type = MPI_DOUBLE;   /* only ARMCI_ACC_DBL is used */
-    MPI_Type_size(*mpi_type, type_size);
 }
 
 unsigned DEBUG_CATS_ENABLED = DEBUG_CAT_NONE;
@@ -411,7 +403,6 @@ int ARMCII_Is_win_unified(MPI_Win win)
     return -1;
   }
 }
-
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
@@ -1034,7 +1025,7 @@ int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int coun
   int type_count, type_size;
 
   if (op == ARMCII_OP_ACC) {
-    ARMCII_Acc_type_translate(datatype, &type, &type_size);
+    type = MPI_DOUBLE; MPI_Type_size(type, &type_size);   /* inlined ARMCII_Acc_type_translate (ARMCI_ACC_DBL) */
   } else {
     type = MPI_BYTE;
     MPI_Type_size(type, &type_size);
@@ -1176,7 +1167,7 @@ int ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count
   ARMCII_Assert(new_bufs != NULL);
   new_bufs[count] = NULL;
 
-  scaled = ARMCII_Buf_acc_is_scaled(datatype, scale);
+  scaled = (fabs(*((double*)scale) - 1.0) < DBL_EPSILON) ? 0 : 1;   /* inlined ARMCII_Buf_acc_is_scaled (ARMCI_ACC_DBL) */
 
   if (scaled) {
 
@@ -1231,10 +1222,6 @@ void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int
   }
 
   free(new_bufs);
-}
-
-int ARMCII_Buf_acc_is_scaled(int datatype, void *scale) {   /* ARMCI_ACC_DBL only */
-  return (fabs(*((double*)scale) - 1.0) < DBL_EPSILON) ? 0 : 1;
 }
 
 void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale) {   /* ARMCI_ACC_DBL only */
