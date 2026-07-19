@@ -15,8 +15,6 @@
 #include <assert.h>
 #include <unistd.h>
 
-#if defined __SUNPRO_CC && !defined __RESTRICT
-#endif
 
 #define USE_RMA_REQUESTS 1
 
@@ -428,25 +426,6 @@ void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
 void    ARMCII_Warning(const char *fmt, ...);
 
-struct ctree_node_s {
-  uint8_t *lo;
-  uint8_t *hi;
-
-  int height;
-
-  struct ctree_node_s *parent;
-  struct ctree_node_s *left;
-  struct ctree_node_s *right;
-};
-
-typedef struct ctree_node_s * ctree_t;
-
-extern const ctree_t CTREE_EMPTY;
-
-int     ctree_insert(ctree_t *root, uint8_t *lo, uint8_t *hi);
-ctree_t ctree_locate(ctree_t root, uint8_t *lo, uint8_t *hi);
-void    ctree_destroy(ctree_t *root);
-void    ctree_print(ctree_t root);
 
 enum armci_scope_e { SCOPE_ALL, SCOPE_NODE, SCOPE_MASTERS};
 
@@ -831,33 +810,9 @@ int ARMCII_Is_win_unified(MPI_Win win)
 
 #define MAX(A,B) (((A) > (B)) ? A : B)
 
-static ctree_t ctree_balance(ctree_t node);
-static void ctree_destroy_rec(ctree_t root);
-static inline int ctree_node_height(ctree_t node);
-static inline void ctree_rotate_left(ctree_t node);
-static inline void ctree_rotate_right(ctree_t node);
-
-const ctree_t CTREE_EMPTY = NULL;
-
-typedef struct {
-  int     contribute;
-  int     type;
-  uint8_t data[1];
-} sel_data_t;
-
 #define MIN(X,Y) (((X) < (Y)) ? X : Y)
 #define MAX(X,Y) (((X) > (Y)) ? X : Y)
 
-#define ABSV(IN,INOUT,COUNT,DTYPE,ABSOP)        \
-      do {                                      \
-        int i;                                  \
-        DTYPE *in = (DTYPE *)IN;                \
-        DTYPE *io = (DTYPE *)INOUT;             \
-        for (i = 0; i < COUNT; i++)             \
-          io[i] = ABSOP(in[i]);                 \
-      } while (0)
-
-#undef ABSV
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
