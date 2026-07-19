@@ -15,7 +15,6 @@
 #include <assert.h>
 #include <unistd.h>
 
-
 #define USE_RMA_REQUESTS 1
 
 enum  ARMCI_Acc_e { ARMCI_ACC_INT  , ARMCI_ACC_LNG  ,
@@ -25,36 +24,11 @@ enum  ARMCI_Acc_e { ARMCI_ACC_INT  , ARMCI_ACC_LNG  ,
 typedef long armci_size_t;
 #define ARMCII_MPI_SIZE_T MPI_LONG
 
-int   ARMCI_Init(void);
-int   ARMCI_Init_args(int *argc, char ***argv);
-int   ARMCI_Init_thread(int armci_requested);
-int   ARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
-int   ARMCI_Init_mpi_comm(MPI_Comm comm);
-int   ARMCI_Initialized(void);
-
-int   ARMCI_Finalize(void);
 void  ARMCI_Cleanup(void);
 
 void  ARMCI_Error(const char *msg, int code);
 
-int   ARMCI_Malloc(void **base_ptrs, armci_size_t size);
-int   ARMCI_Free(void *ptr);
-
-void *ARMCI_Malloc_local(armci_size_t size);
-int   ARMCI_Free_local(void *ptr);
-
-void  ARMCI_Barrier(void);
-void  ARMCI_Fence(int proc);
-void  ARMCI_AllFence(void);
-
-void  ARMCI_Access_begin(void *ptr);
-void  ARMCI_Access_end(void *ptr);
-
 void  ARMCI_Copy(void *src, void *dst, int size);
-
-int   ARMCI_Get(void *src, void *dst, int size, int target);
-int   ARMCI_Put(void *src, void *dst, int size, int target);
-int   ARMCI_Acc(int datatype, void *scale, void *src, void *dst, int bytes, int proc);
 
 int   ARMCI_PutS(void *src_ptr, int src_stride_ar[ ],
                  void *dst_ptr, int dst_stride_ar[ ],
@@ -67,7 +41,6 @@ int   ARMCI_AccS(int datatype, void *scale,
                  void *dst_ptr, int dst_stride_ar[ ],
                  int count[ ], int stride_levels, int proc);
 
-int   ARMCI_Put_flag(void *src, void* dst, int size, int *flag, int value, int proc);
 int   ARMCI_PutS_flag(void *src_ptr, int src_stride_ar[ ],
                  void *dst_ptr, int dst_stride_ar[ ],
                  int count[ ], int stride_levels,
@@ -81,19 +54,6 @@ typedef struct armci_hdl_s
 }
 armci_hdl_t;
 
-void  ARMCI_INIT_HANDLE(armci_hdl_t *hdl);
-void  ARMCI_SET_AGGREGATE_HANDLE(armci_hdl_t* handle);
-void  ARMCI_UNSET_AGGREGATE_HANDLE(armci_hdl_t* handle);
-
-int   ARMCI_NbPut(void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
-int   ARMCI_NbGet(void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
-int   ARMCI_NbAcc(int datatype, void *scale, void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
-
-int   ARMCI_Wait(armci_hdl_t* hdl);
-int   ARMCI_Test(armci_hdl_t* hdl);
-int   ARMCI_WaitProc(int proc);
-int   ARMCI_WaitAll(void);
-
 int   ARMCI_NbPutS(void *src_ptr, int src_stride_ar[ ],
                    void *dst_ptr, int dst_stride_ar[ ],
                    int count[ ], int stride_levels, int proc, armci_hdl_t *hdl);
@@ -105,9 +65,6 @@ int   ARMCI_NbAccS(int datatype, void *scale,
                    void *dst_ptr, int dst_stride_ar[ ],
                    int count[ ], int stride_levels, int proc, armci_hdl_t *hdl);
 
-void armci_write_strided(void *ptr, int stride_levels, int stride_arr[], int count[], char *buf);
-void armci_read_strided(void *ptr, int stride_levels, int stride_arr[], int count[], char *buf);
-
 typedef struct {
   void **src_ptr_array;
   void **dst_ptr_array;
@@ -115,38 +72,8 @@ typedef struct {
   int    ptr_array_len;
 } armci_giov_t;
 
-int ARMCI_PutV(armci_giov_t *iov, int iov_len, int proc);
-int ARMCI_GetV(armci_giov_t *iov, int iov_len, int proc);
-int ARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
-
-int ARMCI_NbPutV(armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-int ARMCI_NbGetV(armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-int ARMCI_NbAccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-
-int ARMCI_PutValueInt(int src, void *dst, int proc);
-int ARMCI_PutValueLong(long src, void *dst, int proc);
-int ARMCI_PutValueFloat(float src, void *dst, int proc);
-int ARMCI_PutValueDouble(double src, void *dst, int proc);
-
-int ARMCI_NbPutValueInt(int src, void *dst, int proc, armci_hdl_t *hdl);
-int ARMCI_NbPutValueLong(long src, void *dst, int proc, armci_hdl_t *hdl);
-int ARMCI_NbPutValueFloat(float src, void *dst, int proc, armci_hdl_t *hdl);
-int ARMCI_NbPutValueDouble(double src, void *dst, int proc, armci_hdl_t *hdl);
-
-int    ARMCI_GetValueInt(void *src, int proc);
-long   ARMCI_GetValueLong(void *src, int proc);
-float  ARMCI_GetValueFloat(void *src, int proc);
-double ARMCI_GetValueDouble(void *src, int proc);
-
-int   ARMCI_Create_mutexes(int count);
-int   ARMCI_Destroy_mutexes(void);
-void  ARMCI_Lock(int mutex, int proc);
-void  ARMCI_Unlock(int mutex, int proc);
-
 enum ARMCI_Rmw_e { ARMCI_FETCH_AND_ADD, ARMCI_FETCH_AND_ADD_LONG,
                    ARMCI_SWAP, ARMCI_SWAP_LONG };
-
-int ARMCI_Rmw(int op, void *ploc, void *prem, int value, int proc);
 
 typedef struct {
   MPI_Comm  comm;
@@ -157,18 +84,7 @@ typedef struct {
   int       size;
 } ARMCI_Group;
 
-void ARMCI_Group_create(int grp_size, int *pid_list, ARMCI_Group *group_out);
-void ARMCI_Group_create_child(int grp_size, int *pid_list, ARMCI_Group *group_out, ARMCI_Group *group_parent);
 void ARMCI_Group_free(ARMCI_Group *group);
-
-int  ARMCI_Group_rank(ARMCI_Group *group, int *rank);
-void ARMCI_Group_size(ARMCI_Group *group, int *size);
-
-void ARMCI_Group_set_default(ARMCI_Group *group);
-void ARMCI_Group_get_default(ARMCI_Group *group_out);
-void ARMCI_Group_get_world(ARMCI_Group *group_out);
-
-int ARMCI_Absolute_id(ARMCI_Group *group,int group_rank);
 
 int ARMCI_Malloc_group(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group);
 int ARMCI_Free_group(void *ptr, ARMCI_Group *group);
@@ -177,41 +93,17 @@ enum armci_domain_e { ARMCI_DOMAIN_SMP };
 
 typedef int armci_domain_t;
 
-int armci_domain_nprocs(armci_domain_t domain, int id);
-int armci_domain_id(armci_domain_t domain, int glob_proc_id);
-int armci_domain_glob_proc_id(armci_domain_t domain, int id, int loc_proc_id);
-int armci_domain_my_id(armci_domain_t domain);
-int armci_domain_count(armci_domain_t domain);
-int armci_domain_same_id(armci_domain_t domain, int proc);
-
-int ARMCI_Same_node(int proc);
-
-int  ARMCI_Uses_shm(void);
-void ARMCI_Set_shm_limit(unsigned long shmemlimit);
-int  ARMCI_Uses_shm_grp(ARMCI_Group *group);
-
 int     PARMCI_Init(void);
-int     PARMCI_Init_args(int *argc, char ***argv);
-int     PARMCI_Init_thread(int armci_requested);
 int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
-int     PARMCI_Init_mpi_comm(MPI_Comm comm);
 int     PARMCI_Initialized(void);
 int     PARMCI_Finalize(void);
 
 int     PARMCI_Malloc(void **base_ptrs, armci_size_t size);
 int     PARMCI_Free(void *ptr);
-void   *PARMCI_Malloc_local(armci_size_t size);
-int     PARMCI_Free_local(void *ptr);
 
-void    PARMCI_Barrier(void);
-void    PARMCI_Fence(int proc);
 void    PARMCI_AllFence(void);
-void    PARMCI_Access_begin(void *ptr);
-void    PARMCI_Access_end(void *ptr);
 
 int     PARMCI_Get(void *src, void *dst, int size, int target);
-int     PARMCI_Put(void *src, void *dst, int size, int target);
-int     PARMCI_Acc(int datatype, void *scale, void *src, void *dst, int bytes, int proc);
 
 int     PARMCI_PutS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
                  int count[], int stride_levels, int proc);
@@ -219,62 +111,17 @@ int     PARMCI_GetS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_s
                  int count[], int stride_levels, int proc);
 int     PARMCI_AccS(int datatype, void *scale, void *src_ptr, int src_stride_ar[],
                  void *dst_ptr, int dst_stride_ar[], int count[], int stride_levels, int proc);
-int     PARMCI_Put_flag(void *src, void* dst, int size, int *flag, int value, int proc);
 int     PARMCI_PutS_flag(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
                  int count[], int stride_levels, int *flag, int value, int proc);
 
-int     PARMCI_PutV(armci_giov_t *iov, int iov_len, int proc);
-int     PARMCI_GetV(armci_giov_t *iov, int iov_len, int proc);
 int     PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
 
-int     PARMCI_Wait(armci_hdl_t* hdl);
-int     PARMCI_Test(armci_hdl_t* hdl);
-int     PARMCI_WaitProc(int proc);
-int     PARMCI_WaitAll(void);
-
-int     PARMCI_NbPut(void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbGet(void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbAcc(int datatype, void *scale, void *src, void *dst, int bytes, int proc, armci_hdl_t *hdl);
 int     PARMCI_NbPutS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
                    int count[], int stride_levels, int proc, armci_hdl_t *hdl);
 int     PARMCI_NbGetS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
                    int count[], int stride_levels, int proc, armci_hdl_t *hdl);
 int     PARMCI_NbAccS(int datatype, void *scale, void *src_ptr, int src_stride_ar[],
                    void *dst_ptr, int dst_stride_ar[], int count[], int stride_levels, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbPutV(armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-int     PARMCI_NbGetV(armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-int     PARMCI_NbAccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc, armci_hdl_t* handle);
-
-int     PARMCI_PutValueInt(int src, void *dst, int proc);
-int     PARMCI_PutValueLong(long src, void *dst, int proc);
-int     PARMCI_PutValueFloat(float src, void *dst, int proc);
-int     PARMCI_PutValueDouble(double src, void *dst, int proc);
-int     PARMCI_NbPutValueInt(int src, void *dst, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbPutValueLong(long src, void *dst, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbPutValueFloat(float src, void *dst, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbPutValueDouble(double src, void *dst, int proc, armci_hdl_t *hdl);
-
-int     PARMCI_GetValueInt(void *src, int proc);
-long    PARMCI_GetValueLong(void *src, int proc);
-float   PARMCI_GetValueFloat(void *src, int proc);
-double  PARMCI_GetValueDouble(void *src, int proc);
-
-int     PARMCI_Create_mutexes(int count);
-int     PARMCI_Destroy_mutexes(void);
-void    PARMCI_Lock(int mutex, int proc);
-void    PARMCI_Unlock(int mutex, int proc);
-int     PARMCI_Rmw(int op, void *ploc, void *prem, int value, int proc);
-
-void    parmci_msg_barrier(void);
-void    parmci_msg_group_barrier(ARMCI_Group *group);
-
-int ARMCI_Malloc_memdev(void **ptr_arr, armci_size_t bytes, const char* device);
-int ARMCI_Malloc_group_memdev(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group, const char *device);
-int ARMCI_Free_memdev(void *ptr);
-
-int PARMCI_Malloc_memdev(void **ptr_arr, armci_size_t bytes, const char* device);
-int PARMCI_Malloc_group_memdev(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group, const char *device);
-int PARMCI_Free_memdev(void *ptr);
 
 #if ( defined(__GNUC__) && (__GNUC__ >= 3) ) || defined(__IBMC__) || defined(__INTEL_COMPILER) || defined(__clang__)
 #  define unlikely(x_) __builtin_expect(!!(x_),0)
@@ -338,8 +185,6 @@ int   ARMCII_Getenv_int(const char *varname, int default_value);
 long  ARMCII_Getenv_long(const char *varname, long default_value);
 void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length);
 
-void ARMCII_Sync_local(void);
-
 int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
 
@@ -359,9 +204,6 @@ typedef struct {
 } armcii_iov_iter_t;
 
 void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *type, int *type_size);
-
-int  ARMCII_Iov_check_overlap(void **ptrs, int count, int size);
-int  ARMCII_Iov_check_same_allocation(void **ptrs, int count, int proc);
 
 void ARMCII_Strided_to_iov(armci_giov_t *iov,
                void *src_ptr, int src_stride_ar[ ],
@@ -383,23 +225,15 @@ armcii_iov_iter_t *ARMCII_Strided_to_iov_iter(
                void *src_ptr, int src_stride_ar[ ],
                void *dst_ptr, int dst_stride_ar[ ],
                int count[ ], int stride_levels);
-void ARMCII_Iov_iter_free(armcii_iov_iter_t *it);
-int  ARMCII_Iov_iter_has_next(armcii_iov_iter_t *it);
-int  ARMCII_Iov_iter_next(armcii_iov_iter_t *it, void **src, void **dst);
 
-int  ARMCII_Buf_prepare_read_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size);
-void ARMCII_Buf_finish_read_vec(void **orig_bufs, void **new_bufs, int count, int size);
 int  ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size,
                             int datatype, void *scale);
 void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int size);
-int  ARMCII_Buf_prepare_write_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size);
-void ARMCII_Buf_finish_write_vec(void **orig_bufs, void **new_bufs, int count, int size);
 
 int  ARMCII_Buf_acc_is_scaled(int datatype, void *scale);
 void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale);
 
 int ARMCII_Is_win_unified(MPI_Win win);
-void ARMCII_Sync(void);
 
 enum debug_cats_e {
   DEBUG_CAT_ALL        =  -1,
@@ -426,35 +260,12 @@ void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
 void    ARMCII_Warning(const char *fmt, ...);
 
-
 enum armci_scope_e { SCOPE_ALL, SCOPE_NODE, SCOPE_MASTERS};
 
 enum armci_type_e  { ARMCI_INT, ARMCI_LONG, ARMCI_LONG_LONG, ARMCI_FLOAT, ARMCI_DOUBLE };
 
-int  armci_msg_me(void);
-int  armci_msg_nproc(void);
-
-void armci_msg_abort(int code);
-double armci_timer(void);
-
-void armci_msg_snd(int tag, void *buffer, int len, int to);
-void armci_msg_rcv(int tag, void *buffer, int buflen, int *msglen, int from);
-int  armci_msg_rcvany(int tag, void *buffer, int buflen, int *msglen);
-
-void armci_msg_barrier(void);
-void armci_msg_group_barrier(ARMCI_Group *group);
-void armci_msg_bintree(int scope, int *Root, int *Up, int *Left, int *Right);
-
-void armci_msg_bcast(void *buffer, int len, int root);
-void armci_msg_bcast_scope(int scope, void *buffer, int len, int root);
-void armci_msg_brdcst(void *buffer, int len, int root);
-void armci_msg_group_bcast_scope(int scope, void *buf, int len, int root, ARMCI_Group *group);
-
   void armci_msg_reduce(void *x, int n, char *op, int type);
   void armci_msg_reduce_scope(int scope, void *x, int n, char *op, int type);
-
-void armci_msg_sel(void *x, int n, char *op, int type, int contribute);
-void armci_msg_sel_scope(int scope, void *x, int n, char *op, int type, int contribute);
 
   void armci_exchange_address(void *ptr_ar[], int n);
 
@@ -468,23 +279,6 @@ void armci_msg_sel_scope(int scope, void *x, int n, char *op, int type, int cont
   void armci_exchange_address_grp(void *ptr_arr[], int n, ARMCI_Group *group);
   void armci_grp_clus_brdcst(void *buf, int len, int grp_master, int grp_clus_nproc,ARMCI_Group *mastergroup);
 
-void armci_msg_gop_scope(int scope, void *x, int n, char *op, int type);
-void armci_msg_igop(int *x, int n, char *op);
-void armci_msg_lgop(long *x, int n, char *op);
-void armci_msg_llgop(long long *x, int n, char *op);
-void armci_msg_fgop(float *x, int n, char *op);
-void armci_msg_dgop(double *x, int n, char *op);
-
-void armci_msg_group_gop_scope(int scope, void *x, int n, char *op, int type, ARMCI_Group *group);
-void armci_msg_group_igop(int *x, int n, char *op, ARMCI_Group *group);
-void armci_msg_group_lgop(long *x, int n, char *op, ARMCI_Group *group);
-void armci_msg_group_llgop(long long *x, int n, char *op, ARMCI_Group *group);
-void armci_msg_group_fgop(float *x, int n, char *op, ARMCI_Group *group);
-void armci_msg_group_dgop(double *x, int n,char *op, ARMCI_Group *group);
-
-int ARMCIX_Group_split(ARMCI_Group *parent, int color, int key, ARMCI_Group *new_group);
-int ARMCIX_Group_dup(ARMCI_Group *parent, ARMCI_Group *new_group);
-
 struct armcix_mutex_hdl_s {
   int         my_count;
   int         max_count;
@@ -494,14 +288,6 @@ struct armcix_mutex_hdl_s {
 };
 
 typedef struct armcix_mutex_hdl_s * armcix_mutex_hdl_t;
-
-armcix_mutex_hdl_t ARMCIX_Create_mutexes_hdl(int count, ARMCI_Group *pgroup);
-int  ARMCIX_Destroy_mutexes_hdl(armcix_mutex_hdl_t hdl);
-void ARMCIX_Lock_hdl(armcix_mutex_hdl_t hdl, int mutex, int proc);
-int  ARMCIX_Trylock_hdl(armcix_mutex_hdl_t hdl, int mutex, int proc);
-void ARMCIX_Unlock_hdl(armcix_mutex_hdl_t hdl, int mutex, int proc);
-
-void ARMCIX_Progress(void);
 
 typedef armci_size_t gmr_size_t;
 #define GMR_MPI_SIZE_T ARMCII_MPI_SIZE_T
@@ -529,8 +315,6 @@ void   gmr_destroy(gmr_t *mreg, ARMCI_Group *group);
 int    gmr_destroy_all(void);
 gmr_t *gmr_lookup(void *ptr, int proc);
 
-int gmr_fetch_and_op(gmr_t *mreg, void *src, void *out, void *dst, MPI_Datatype type, MPI_Op op, int proc);
-
 int gmr_get(gmr_t *mreg, void *src, void *dst, int size,
             int target, armci_hdl_t * handle);
 int gmr_put(gmr_t *mreg, void *src, void *dst, int size,
@@ -554,14 +338,9 @@ int gmr_get_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype
                              void *dst, int dst_count, MPI_Datatype dst_type,
                              MPI_Op op, int proc, armci_hdl_t * handle);
 
-int gmr_lockall(gmr_t *mreg);
-int gmr_unlockall(gmr_t *mreg);
 int gmr_flush(gmr_t *mreg, int proc, int local_only);
 int gmr_flushall(gmr_t *mreg, int local_only);
-int gmr_sync(gmr_t *mreg);
-int gmr_wait(armci_hdl_t * handle);
 
-void gmr_progress(void);
 void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req);
 
 global_state_t ARMCII_GLOBAL_STATE = { 0 };
@@ -812,7 +591,6 @@ int ARMCII_Is_win_unified(MPI_Win win)
 
 #define MIN(X,Y) (((X) < (Y)) ? X : Y)
 #define MAX(X,Y) (((X) > (Y)) ? X : Y)
-
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
