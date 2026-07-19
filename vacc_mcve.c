@@ -30,22 +30,6 @@ void  ARMCI_Error(const char *msg, int code);
 
 void  ARMCI_Copy(void *src, void *dst, int size);
 
-int   ARMCI_PutS(void *src_ptr, int src_stride_ar[ ],
-                 void *dst_ptr, int dst_stride_ar[ ],
-                 int count[ ], int stride_levels, int proc);
-int   ARMCI_GetS(void *src_ptr, int src_stride_ar[ ],
-                 void *dst_ptr, int dst_stride_ar[ ],
-                 int count[ ], int stride_levels, int proc);
-int   ARMCI_AccS(int datatype, void *scale,
-                 void *src_ptr, int src_stride_ar[ ],
-                 void *dst_ptr, int dst_stride_ar[ ],
-                 int count[ ], int stride_levels, int proc);
-
-int   ARMCI_PutS_flag(void *src_ptr, int src_stride_ar[ ],
-                 void *dst_ptr, int dst_stride_ar[ ],
-                 int count[ ], int stride_levels,
-                 int *flag, int value, int proc);
-
 typedef struct armci_hdl_s
 {
     int batch_size;
@@ -53,17 +37,6 @@ typedef struct armci_hdl_s
     MPI_Request *request_array;
 }
 armci_hdl_t;
-
-int   ARMCI_NbPutS(void *src_ptr, int src_stride_ar[ ],
-                   void *dst_ptr, int dst_stride_ar[ ],
-                   int count[ ], int stride_levels, int proc, armci_hdl_t *hdl);
-int   ARMCI_NbGetS(void *src_ptr, int src_stride_ar[ ],
-                   void *dst_ptr, int dst_stride_ar[ ],
-                   int count[ ], int stride_levels, int proc, armci_hdl_t *hdl);
-int   ARMCI_NbAccS(int datatype, void *scale,
-                   void *src_ptr, int src_stride_ar[ ],
-                   void *dst_ptr, int dst_stride_ar[ ],
-                   int count[ ], int stride_levels, int proc, armci_hdl_t *hdl);
 
 typedef struct {
   void **src_ptr_array;
@@ -105,23 +78,7 @@ void    PARMCI_AllFence(void);
 
 int     PARMCI_Get(void *src, void *dst, int size, int target);
 
-int     PARMCI_PutS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
-                 int count[], int stride_levels, int proc);
-int     PARMCI_GetS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
-                 int count[], int stride_levels, int proc);
-int     PARMCI_AccS(int datatype, void *scale, void *src_ptr, int src_stride_ar[],
-                 void *dst_ptr, int dst_stride_ar[], int count[], int stride_levels, int proc);
-int     PARMCI_PutS_flag(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
-                 int count[], int stride_levels, int *flag, int value, int proc);
-
 int     PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
-
-int     PARMCI_NbPutS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
-                   int count[], int stride_levels, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbGetS(void *src_ptr, int src_stride_ar[], void *dst_ptr, int dst_stride_ar[],
-                   int count[], int stride_levels, int proc, armci_hdl_t *hdl);
-int     PARMCI_NbAccS(int datatype, void *scale, void *src_ptr, int src_stride_ar[],
-                   void *dst_ptr, int dst_stride_ar[], int count[], int stride_levels, int proc, armci_hdl_t *hdl);
 
 #if ( defined(__GNUC__) && (__GNUC__ >= 3) ) || defined(__IBMC__) || defined(__INTEL_COMPILER) || defined(__clang__)
 #  define unlikely(x_) __builtin_expect(!!(x_),0)
@@ -205,26 +162,11 @@ typedef struct {
 
 void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *type, int *type_size);
 
-void ARMCII_Strided_to_iov(armci_giov_t *iov,
-               void *src_ptr, int src_stride_ar[ ],
-               void *dst_ptr, int dst_stride_ar[ ],
-               int count[ ], int stride_levels);
-
-void ARMCII_Strided_to_dtype(int stride_array[ ], int count[ ],
-                             int stride_levels, MPI_Datatype old_type, MPI_Datatype *new_type);
-
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
     int datatype, int overlapping, int same_alloc, int proc, int blocking, armci_hdl_t * handle);
 
-int ARMCII_Iov_op_batched(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
-    MPI_Datatype type, int proc, int consrv  , int blocking, armci_hdl_t * handle);
 int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
     MPI_Datatype type, int proc, int blocking, armci_hdl_t * handle);
-
-armcii_iov_iter_t *ARMCII_Strided_to_iov_iter(
-               void *src_ptr, int src_stride_ar[ ],
-               void *dst_ptr, int dst_stride_ar[ ],
-               int count[ ], int stride_levels);
 
 int  ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size,
                             int datatype, void *scale);
@@ -264,21 +206,6 @@ enum armci_scope_e { SCOPE_ALL, SCOPE_NODE, SCOPE_MASTERS};
 
 enum armci_type_e  { ARMCI_INT, ARMCI_LONG, ARMCI_LONG_LONG, ARMCI_FLOAT, ARMCI_DOUBLE };
 
-  void armci_msg_reduce(void *x, int n, char *op, int type);
-  void armci_msg_reduce_scope(int scope, void *x, int n, char *op, int type);
-
-  void armci_exchange_address(void *ptr_ar[], int n);
-
-  void armci_msg_clus_brdcst(void *buf, int len);
-  void armci_msg_clus_igop(int *x, int n, char *op);
-  void armci_msg_clus_fgop(float *x, int n, char *op);
-  void armci_msg_clus_lgop(long *x, int n, char *op);
-  void armci_msg_clus_llgop(long long *x, int n, char *op);
-  void armci_msg_clus_dgop(double *x, int n, char *op);
-
-  void armci_exchange_address_grp(void *ptr_arr[], int n, ARMCI_Group *group);
-  void armci_grp_clus_brdcst(void *buf, int len, int grp_master, int grp_clus_nproc,ARMCI_Group *mastergroup);
-
 struct armcix_mutex_hdl_s {
   int         my_count;
   int         max_count;
@@ -317,12 +244,6 @@ gmr_t *gmr_lookup(void *ptr, int proc);
 
 int gmr_get(gmr_t *mreg, void *src, void *dst, int size,
             int target, armci_hdl_t * handle);
-int gmr_put(gmr_t *mreg, void *src, void *dst, int size,
-            int target, armci_hdl_t * handle);
-int gmr_accumulate(gmr_t *mreg, void *src, void *dst, int count, MPI_Datatype type,
-                   int proc, armci_hdl_t * handle);
-int gmr_get_accumulate(gmr_t *mreg, void *src, void *out, void *dst, int count, MPI_Datatype type,
-                       MPI_Op op, int proc, armci_hdl_t * handle);
 
 int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
@@ -333,10 +254,6 @@ int gmr_put_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
 int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                          void *dst, int dst_count, MPI_Datatype dst_type,
                          int proc, armci_hdl_t * handle);
-int gmr_get_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                             void *out, int out_count, MPI_Datatype out_type,
-                             void *dst, int dst_count, MPI_Datatype dst_type,
-                             MPI_Op op, int proc, armci_hdl_t * handle);
 
 int gmr_flush(gmr_t *mreg, int proc, int local_only);
 int gmr_flushall(gmr_t *mreg, int local_only);
