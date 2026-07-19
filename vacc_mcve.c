@@ -1985,13 +1985,6 @@ void ARMCI_Cleanup(void) {
 #define DIM5 7
 #define DIM6 3
 #define DIM7 2
-#define EDIM1 (DIM1+OFF)
-#define EDIM2 (DIM2+OFF)
-#define EDIM3 (DIM3+OFF)
-#define EDIM4 (DIM4+OFF)
-#define EDIM5 (DIM5+OFF)
-#define EDIM6 (DIM6+OFF)
-#define EDIM7 (DIM7+OFF)
 int me, nproc;
 void* work[MAXPROC];
 static void print_subscript(char *pre,int ndim, int subscript[], char* post)
