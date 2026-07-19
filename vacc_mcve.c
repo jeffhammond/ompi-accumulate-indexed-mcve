@@ -15,11 +15,11 @@
 #include <assert.h>
 #include <unistd.h>
 
-#define USE_RMA_REQUESTS 1
+#define MAX(A,B) (((A) > (B)) ? A : B)
+#define MIN(A,B) (((A) < (B)) ? (A) : (B))
+#define ABS(a) (((a) <0) ? -(a) : (a))
 
-enum  ARMCI_Acc_e { ARMCI_ACC_INT  , ARMCI_ACC_LNG  ,
-                    ARMCI_ACC_FLT  , ARMCI_ACC_DBL  ,
-                    ARMCI_ACC_CPL  , ARMCI_ACC_DCP   };
+enum  ARMCI_Acc_e { ARMCI_ACC_DBL };
 
 typedef long armci_size_t;
 #define ARMCII_MPI_SIZE_T MPI_LONG
@@ -428,10 +428,6 @@ int ARMCII_Is_win_unified(MPI_Win win)
   }
 }
 
-#define MAX(A,B) (((A) > (B)) ? A : B)
-
-#define MIN(X,Y) (((X) < (Y)) ? X : Y)
-#define MAX(X,Y) (((X) > (Y)) ? X : Y)
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
@@ -1268,8 +1264,6 @@ void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, v
   ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of the datatype size");
 }
 
-#define MIN(A,B) (((A) < (B)) ? (A) : (B))
-
 enum ARMCII_MPI_Impl_e { ARMCII_MPICH,
                          ARMCII_OPEN_MPI,
                          ARMCII_MVAPICH2,
@@ -1730,9 +1724,6 @@ int PARMCI_Finalize(void) {
 #define MAXPROC 128
 #define TIMES 100
 #define BASE 100.
-#define ABS(a) (((a) <0) ? -(a) : (a))
-#define MAX(a,b) (((a) >= (b)) ? (a) : (b))
-#define MIN(a,b) (((a) <= (b)) ? (a) : (b))
 #define MAXDIMS 7
 int me, nproc;
 void* work[MAXPROC];
