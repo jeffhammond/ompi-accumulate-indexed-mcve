@@ -195,7 +195,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   int proc, armci_hdl_t * handle);
 
 int gmr_flush(gmr_t *mreg, int proc, int local_only);
-int gmr_flushall(gmr_t *mreg, int local_only);
 
 void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req);
 
@@ -318,7 +317,7 @@ void PARMCI_AllFence(void) {
   gmr_t *cur_mreg = gmr_list;
 
   while (cur_mreg) {
-    gmr_flushall(cur_mreg, 0);
+    MPI_Win_flush_all(cur_mreg->window);   /* inlined gmr_flushall(local_only=0) */
     cur_mreg = cur_mreg->next;
   }
   return;
@@ -863,21 +862,6 @@ int gmr_flush(gmr_t *mreg, int proc, int local_only) {
     MPI_Win_flush(grp_proc, mreg->window);
   } else {
     MPI_Win_flush_local(grp_proc, mreg->window);
-  }
-
-  return 0;
-}
-
-int gmr_flushall(gmr_t *mreg, int local_only) {
-  int grp_me   = ARMCII_Translate_absolute_to_group(&mreg->group, ARMCI_GROUP_WORLD.rank);
-
-  ARMCII_Assert(grp_me >= 0);
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-
-  if (!local_only || ARMCII_GLOBAL_STATE.end_to_end_flush) {
-    MPI_Win_flush_all(mreg->window);
-  } else {
-    MPI_Win_flush_local_all(mreg->window);
   }
 
   return 0;
