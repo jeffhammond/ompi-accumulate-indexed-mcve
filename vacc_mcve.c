@@ -1,52 +1,24 @@
 
 
-#ifndef _ARMCICONF_H_
-#define _ARMCICONF_H_
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <errno.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <execinfo.h>
+#include <limits.h>
+#include <math.h>
+#include <float.h>
+#include <assert.h>
+#include <unistd.h>
 
 #if defined __SUNPRO_CC && !defined __RESTRICT
 #endif
 
-#endif
-
-#ifndef _ARMCI_H_
-#define _ARMCI_H_
-
 #define USE_RMA_REQUESTS 1
-
-#include <mpi.h>
-
 
 enum  ARMCI_Acc_e { ARMCI_ACC_INT  , ARMCI_ACC_LNG  ,
                     ARMCI_ACC_FLT  , ARMCI_ACC_DBL  ,
@@ -306,19 +278,6 @@ int PARMCI_Malloc_memdev(void **ptr_arr, armci_size_t bytes, const char* device)
 int PARMCI_Malloc_group_memdev(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group, const char *device);
 int PARMCI_Free_memdev(void *ptr);
 
-#endif
-
-#ifndef HAVE_ARMCI_INTERNALS_H
-#define HAVE_ARMCI_INTERNALS_H
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#  include <stdint.h>
-#include <errno.h>
-
-#include <mpi.h>
-
 #if ( defined(__GNUC__) && (__GNUC__ >= 3) ) || defined(__IBMC__) || defined(__INTEL_COMPILER) || defined(__clang__)
 #  define unlikely(x_) __builtin_expect(!!(x_),0)
 #  define likely(x_)   __builtin_expect(!!(x_),1)
@@ -383,7 +342,6 @@ void ARMCII_Getenv_char(char * output, const char *varname, const char *default_
 
 void ARMCII_Sync_local(void);
 
-
 int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
 
@@ -445,13 +403,6 @@ void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, v
 int ARMCII_Is_win_unified(MPI_Win win);
 void ARMCII_Sync(void);
 
-#endif
-
-#ifndef _DEBUG_H_
-#define _DEBUG_H_
-
-#include <stdarg.h>
-
 enum debug_cats_e {
   DEBUG_CAT_ALL        =  -1,
   DEBUG_CAT_NONE       =   0,
@@ -477,11 +428,6 @@ void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
 void    ARMCII_Warning(const char *fmt, ...);
 
-#endif
-
-#ifndef _CONFLICT_TREE_H
-#define _CONFLICT_TREE_H
-
 struct ctree_node_s {
   uint8_t *lo;
   uint8_t *hi;
@@ -501,11 +447,6 @@ int     ctree_insert(ctree_t *root, uint8_t *lo, uint8_t *hi);
 ctree_t ctree_locate(ctree_t root, uint8_t *lo, uint8_t *hi);
 void    ctree_destroy(ctree_t *root);
 void    ctree_print(ctree_t root);
-
-#endif
-
-#ifndef HAVE_ARMCI_MSG_H
-#define HAVE_ARMCI_MSG_H
 
 enum armci_scope_e { SCOPE_ALL, SCOPE_NODE, SCOPE_MASTERS};
 
@@ -562,13 +503,6 @@ void armci_msg_group_llgop(long long *x, int n, char *op, ARMCI_Group *group);
 void armci_msg_group_fgop(float *x, int n, char *op, ARMCI_Group *group);
 void armci_msg_group_dgop(double *x, int n,char *op, ARMCI_Group *group);
 
-#endif
-
-#ifndef _ARMCIX_H_
-#define _ARMCIX_H_
-
-#  include <stdint.h>
-
 int ARMCIX_Group_split(ARMCI_Group *parent, int color, int key, ARMCI_Group *new_group);
 int ARMCIX_Group_dup(ARMCI_Group *parent, ARMCI_Group *new_group);
 
@@ -589,15 +523,6 @@ int  ARMCIX_Trylock_hdl(armcix_mutex_hdl_t hdl, int mutex, int proc);
 void ARMCIX_Unlock_hdl(armcix_mutex_hdl_t hdl, int mutex, int proc);
 
 void ARMCIX_Progress(void);
-
-#endif
-
-#ifndef HAVE_GMR_H
-#define HAVE_GMR_H
-
-#include <mpi.h>
-
-#include <stdbool.h>
 
 typedef armci_size_t gmr_size_t;
 #define GMR_MPI_SIZE_T ARMCII_MPI_SIZE_T
@@ -659,12 +584,6 @@ int gmr_wait(armci_hdl_t * handle);
 
 void gmr_progress(void);
 void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req);
-
-#endif
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <mpi.h>
 
 global_state_t ARMCII_GLOBAL_STATE = { 0 };
 
@@ -748,11 +667,6 @@ void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *mpi_type, int *
     MPI_Type_size(*mpi_type, type_size);
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <mpi.h>
-
 unsigned DEBUG_CATS_ENABLED =
     DEBUG_CAT_NONE;
 
@@ -768,7 +682,6 @@ void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int
                     "[%d] Message: \"%s\"\n", rank, func, file, line, expr, rank, msg);
 
   {
-#include <execinfo.h>
 
     const int SIZE = 100;
     int    j, nframes;
@@ -824,14 +737,6 @@ void ARMCII_Warning(const char *fmt, ...) {
   fprintf(stderr, "%s", string);
   fflush(NULL);
 }
-
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mpi.h>
 
 void ARMCI_Error(const char *msg, int code) {
   fprintf(stderr, "[%d] ARMCI Error: %s\n", ARMCI_GROUP_WORLD.rank, msg);
@@ -924,12 +829,6 @@ int ARMCII_Is_win_unified(MPI_Win win)
   }
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-
 #define MAX(A,B) (((A) > (B)) ? A : B)
 
 static ctree_t ctree_balance(ctree_t node);
@@ -940,38 +839,14 @@ static inline void ctree_rotate_right(ctree_t node);
 
 const ctree_t CTREE_EMPTY = NULL;
 
-
-
-
-
-
-
-
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mpi.h>
-
 typedef struct {
   int     contribute;
   int     type;
   uint8_t data[1];
 } sel_data_t;
 
-
-
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mpi.h>
-
-
 #define MIN(X,Y) (((X) < (Y)) ? X : Y)
 #define MAX(X,Y) (((X) > (Y)) ? X : Y)
-
-
 
 #define ABSV(IN,INOUT,COUNT,DTYPE,ABSOP)        \
       do {                                      \
@@ -983,9 +858,6 @@ typedef struct {
       } while (0)
 
 #undef ABSV
-
-#include <stdio.h>
-#include <stdlib.h>
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
@@ -1054,11 +926,6 @@ void ARMCI_Group_free(ARMCI_Group *group) {
   group->rank = -1;
   group->size = 0;
 }
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <mpi.h>
 
 int PARMCI_Malloc(void **ptr_arr, armci_size_t bytes) {
   return ARMCI_Malloc_group(ptr_arr, bytes, &ARMCI_GROUP_WORLD);
@@ -1386,7 +1253,6 @@ gmr_t *gmr_lookup(void *ptr, int proc) {
   return mreg;
 }
 
-
 int gmr_put_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
                   int proc, armci_hdl_t * handle)
@@ -1500,7 +1366,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
 
   return 0;
 }
-
 
 int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                          void *dst, int dst_count, MPI_Datatype dst_type,
@@ -1624,10 +1489,6 @@ void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req)
   }
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <mpi.h>
-
 int PARMCI_Get(void *src, void *dst, int size, int target) {
   gmr_t *src_mreg, *dst_mreg;
 
@@ -1666,23 +1527,6 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
   return 0;
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <limits.h>
-
-
-
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
                            int datatype, int overlapping, int same_alloc, int proc,
                            int blocking, armci_hdl_t * handle)
@@ -1702,7 +1546,6 @@ int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int coun
 
   return ARMCII_Iov_op_datatype(op, src, dst, count, type_count, type, proc, blocking, handle);
 }
-
 
 int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int count, int elem_count,
                            MPI_Datatype type, int proc, int blocking, armci_hdl_t * handle)
@@ -1829,14 +1672,6 @@ int PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int p
   return 0;
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <float.h>
-
 int ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count, int size,
                             int datatype, void *scale) {
 
@@ -1903,7 +1738,6 @@ void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int
 
   free(new_bufs);
 }
-
 
 int ARMCII_Buf_acc_is_scaled(int datatype, void *scale) {
   switch (datatype) {
@@ -2057,21 +1891,9 @@ void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, v
       "Transfer size is not a multiple of the datatype size");
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <mpi.h>
-
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
 
 static armcix_mutex_hdl_t armci_mutex_hdl = NULL;
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <mpi.h>
-
 
 enum ARMCII_MPI_Impl_e { ARMCII_MPICH,
                          ARMCII_OPEN_MPI,
@@ -2192,8 +2014,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   MPI_Comm_dup(comm, &ARMCI_GROUP_WORLD.comm);
   ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD);
   ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
-
-
 
   ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
 
@@ -2525,8 +2345,6 @@ int PARMCI_Finalize(void) {
     ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
   }
 
-
-
   ARMCI_Cleanup();
 
   ARMCI_Group_free(&ARMCI_GROUP_WORLD);
@@ -2538,11 +2356,6 @@ void ARMCI_Cleanup(void) {
   return;
 }
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
-#include <unistd.h>
-#include <mpi.h>
 #define MP_BARRIER()      MPI_Barrier(MPI_COMM_WORLD)
 #define ELEMS 500
 #define MAXPROC 128
@@ -2703,7 +2516,6 @@ void scale_patch(double alpha, int ndim, double *patch1, int lo1[], int hi1[], i
 		update_subscript(ndim, subscr1, lo1,hi1, dims1);
 	}
 }
-
 
 void create_array(void *a[], int elem_size, int ndim, int dims[])
 {
