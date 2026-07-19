@@ -195,9 +195,6 @@ int gmr_get(gmr_t *mreg, void *src, void *dst, int size,
 int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
                   int proc, armci_hdl_t * handle);
-int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                         void *dst, int dst_count, MPI_Datatype dst_type,
-                         int proc, armci_hdl_t * handle);
 
 int gmr_flush(gmr_t *mreg, int proc, int local_only);
 int gmr_flushall(gmr_t *mreg, int local_only);
@@ -856,47 +853,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
   return 0;
 }
 
-int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                         void *dst, int dst_count, MPI_Datatype dst_type,
-                         int proc, armci_hdl_t * handle)
-{
-  int        grp_proc;
-  gmr_size_t disp;
-  MPI_Aint lb, extent;
-
-  grp_proc = ARMCII_Translate_absolute_to_group(&mreg->group, proc);
-  ARMCII_Assert(grp_proc >= 0);
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-
-  if (dst == MPI_BOTTOM) {
-    disp = 0;
-  } else {
-    disp = (gmr_size_t) ((uint8_t*)dst - (uint8_t*)mreg->slices[proc].base);
-  }
-
-  MPI_Type_get_true_extent(dst_type, &lb, &extent);
-  ARMCII_Assert_msg(disp >= 0 && disp < mreg->slices[proc].size, "Invalid remote address");
-  ARMCII_Assert_msg(disp + dst_count*extent <= mreg->slices[proc].size, "Transfer is out of range");
-
-  if (handle!=NULL) {
-
-    MPI_Request req = MPI_REQUEST_NULL;
-
-    MPI_Raccumulate(src, src_count, src_type, grp_proc,
-                    (MPI_Aint) disp, dst_count, dst_type,
-                    MPI_SUM, mreg->window, &req);
-
-    gmr_handle_add_request(handle, req);
-
-    return 0;
-
-  }
-
-  MPI_Accumulate(src, src_count, src_type, grp_proc, (MPI_Aint) disp, dst_count, dst_type, MPI_SUM, mreg->window);
-
-  return 0;
-}
-
 int gmr_flush(gmr_t *mreg, int proc, int local_only) {
   int grp_proc = ARMCII_Translate_absolute_to_group(&mreg->group, proc);
   int grp_me   = ARMCII_Translate_absolute_to_group(&mreg->group, ARMCI_GROUP_WORLD.rank);
@@ -1118,7 +1074,11 @@ int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int coun
           flush_local = 0;
           break;
         case ARMCII_OP_ACC:
-          gmr_accumulate_typed(mreg, base_loc_ptr, 1, type_loc, MPI_BOTTOM, 1, type_rem, proc, handle);
+          /* inlined gmr_accumulate_typed: origin=base_loc_ptr+type_loc; target=window base
+           * (disp 0) + type_rem, whose element offsets are relative to the window base. */
+          MPI_Accumulate(base_loc_ptr, 1, type_loc,
+                         ARMCII_Translate_absolute_to_group(&mreg->group, proc), 0,
+                         1, type_rem, MPI_SUM, mreg->window);
           flush_local = 1;
           break;
         default:
@@ -1474,6 +1434,8 @@ int PARMCI_Finalize(void) {
 
   return 0;
 }
+
+/* DO NOT INLINE ANYTHING BELOW HERE */
 
 #define ELEMS 500
 #define MAXPROC 128
