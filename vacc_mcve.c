@@ -24,8 +24,6 @@ enum  ARMCI_Acc_e { ARMCI_ACC_INT  , ARMCI_ACC_LNG  ,
 typedef long armci_size_t;
 #define ARMCII_MPI_SIZE_T MPI_LONG
 
-void  ARMCI_Cleanup(void);
-
 void  ARMCI_Error(const char *msg, int code);
 
 void  ARMCI_Copy(void *src, void *dst, int size);
@@ -1885,15 +1883,9 @@ int PARMCI_Finalize(void) {
     ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
   }
 
-  ARMCI_Cleanup();
-
   ARMCI_Group_free(&ARMCI_GROUP_WORLD);
 
   return 0;
-}
-
-void ARMCI_Cleanup(void) {
-  return;
 }
 
 #define MP_BARRIER()      MPI_Barrier(MPI_COMM_WORLD)
