@@ -59,25 +59,12 @@ int ARMCI_Free_group(void *ptr, ARMCI_Group *group);
 
 int     PARMCI_Init(void);
 int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
-int     PARMCI_Initialized(void);
 int     PARMCI_Finalize(void);
-
 int     PARMCI_Malloc(void **base_ptrs, armci_size_t size);
 int     PARMCI_Free(void *ptr);
-
 void    PARMCI_AllFence(void);
-
 int     PARMCI_Get(void *src, void *dst, int size, int target);
-
 int     PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
-
-#if ( defined(__GNUC__) && (__GNUC__ >= 3) ) || defined(__IBMC__) || defined(__INTEL_COMPILER) || defined(__clang__)
-#  define unlikely(x_) __builtin_expect(!!(x_),0)
-#  define likely(x_)   __builtin_expect(!!(x_),1)
-#else
-#  define unlikely(x_) (x_)
-#  define likely(x_)   (x_)
-#endif
 
 enum ARMCII_Op_e { ARMCII_OP_PUT, ARMCII_OP_GET, ARMCII_OP_ACC };
 
@@ -167,6 +154,7 @@ enum debug_cats_e {
 extern  unsigned DEBUG_CATS_ENABLED;
 
 void    ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func);
+#define unlikely(x_) (x_)
 #define ARMCII_Assert(EXPR)          do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, NULL, __FILE__, __LINE__, __func__); } while(0)
 #define ARMCII_Assert_msg(EXPR, MSG) do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, MSG,  __FILE__, __LINE__, __func__); } while(0)
 
@@ -208,9 +196,6 @@ int gmr_get(gmr_t *mreg, void *src, void *dst, int size,
             int target, armci_hdl_t * handle);
 
 int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                  void *dst, int dst_count, MPI_Datatype dst_type,
-                  int proc, armci_hdl_t * handle);
-int gmr_put_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
                   int proc, armci_hdl_t * handle);
 int gmr_accumulate_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
@@ -280,8 +265,7 @@ void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *mpi_type, int *
     MPI_Type_size(*mpi_type, type_size);
 }
 
-unsigned DEBUG_CATS_ENABLED =
-    DEBUG_CAT_NONE;
+unsigned DEBUG_CATS_ENABLED = DEBUG_CAT_NONE;
 
 void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func) {
   int rank;
@@ -508,8 +492,6 @@ int PARMCI_Free(void *ptr) {
 int ARMCI_Malloc_group(void **base_ptrs, armci_size_t size, ARMCI_Group *group) {
   int i;
   gmr_t *mreg;
-
-  ARMCII_Assert(PARMCI_Initialized());
 
   mreg = gmr_create(size, base_ptrs, group);
 
@@ -1305,50 +1287,21 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   }
 
   ARMCII_GLOBAL_STATE.debug_alloc = ARMCII_Getenv_bool("ARMCI_DEBUG_ALLOC", 0);
-  {
-    int junk;
-    junk = ARMCII_Getenv_bool("ARMCI_FLUSH_BARRIERS", -1);
-    if (junk != -1) {
-      ARMCII_Warning("ARMCI_FLUSH_BARRIERS is deprecated.\n");
-    }
-  }
-
-  if (ARMCII_Getenv("ARMCI_NONCOLLECTIVE_GROUPS")) {
-    ARMCII_GLOBAL_STATE.noncollective_groups = ARMCII_Getenv_bool("ARMCI_NONCOLLECTIVE_GROUPS", 0);
-  }
+  ARMCII_GLOBAL_STATE.noncollective_groups = ARMCII_Getenv_bool("ARMCI_NONCOLLECTIVE_GROUPS", 0);
   ARMCII_GLOBAL_STATE.cache_rank_translation = ARMCII_Getenv_bool("ARMCI_CACHE_RANK_TRANSLATION", 1);
-
-#if defined(OPEN_MPI) && defined(OMPI_MAJOR_VERSION) && (OMPI_MAJOR_VERSION < 5)
-
-  ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_BATCHED;
-  ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_IOV;
-#else
 
   ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
   ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
-#endif
 
   ARMCII_GLOBAL_STATE.iov_checks        = ARMCII_Getenv_bool("ARMCI_IOV_CHECKS", 0);
   ARMCII_GLOBAL_STATE.iov_batched_limit = ARMCII_Getenv_int("ARMCI_IOV_BATCHED_LIMIT", 0);
 
   if (ARMCII_GLOBAL_STATE.iov_batched_limit < 0) {
-    ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_BATCHED_LIMIT (%d)\n",
-                   ARMCII_GLOBAL_STATE.iov_batched_limit);
+    ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_BATCHED_LIMIT (%d)\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
     ARMCII_GLOBAL_STATE.iov_batched_limit = 0;
   }
 
-#if defined(OPEN_MPI)
-# if (OMPI_MAJOR_VERSION >= 5)
-  const int iov_dtype_chunk_default = 1;
-# else
-  const int iov_dtype_chunk_default = 0;
-# endif
-#elif defined(MPICH_VERSION)
-  const int iov_dtype_chunk_default = 256;
-#else
-  const int iov_dtype_chunk_default = 0;
-#endif
-  ARMCII_GLOBAL_STATE.iov_dtype_chunk      = ARMCII_Getenv_int("ARMCI_IOV_DTYPE_CHUNK", iov_dtype_chunk_default);
+  ARMCII_GLOBAL_STATE.iov_dtype_chunk = ARMCII_Getenv_int("ARMCI_IOV_DTYPE_CHUNK", 1);
   if (ARMCII_GLOBAL_STATE.iov_dtype_chunk < 0) {
     ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_DTYPE_CHUNK (%d)\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
     ARMCII_GLOBAL_STATE.iov_dtype_chunk = 0;
@@ -1378,18 +1331,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       ARMCII_Warning("Ignoring unknown value for ARMCI_STRIDED_METHOD (%s)\n", var);
     }
   }
-
-#ifdef OPEN_MPI
-  if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_DIRECT || ARMCII_GLOBAL_STATE.strided_method == ARMCII_STRIDED_DIRECT) {
-    if (ARMCI_GROUP_WORLD.rank == 0) {
-      ARMCII_Warning("MPI Datatypes are broken in RMA in many versions of Open-MPI!\n");
-#if defined(OMPI_MAJOR_VERSION) && (OMPI_MAJOR_VERSION == 4)
-      ARMCII_Warning("Open-MPI 4.0.0 RMA with datatypes is definitely broken."
-                     "See https://github.com/open-mpi/ompi/issues/6275 for details.\n");
-#endif
-    }
-  }
-#endif
 
   ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
 
@@ -1523,10 +1464,6 @@ int PARMCI_Init(void) {
   return PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD);
 }
 
-int PARMCI_Initialized(void) {
-  return ARMCII_GLOBAL_STATE.init_count > 0;
-}
-
 int PARMCI_Finalize(void) {
   int nfreed;
 
@@ -1551,7 +1488,6 @@ int PARMCI_Finalize(void) {
   return 0;
 }
 
-#define MP_BARRIER()      MPI_Barrier(MPI_COMM_WORLD)
 #define ELEMS 500
 #define MAXPROC 128
 #define TIMES 100
@@ -1709,7 +1645,7 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
 void destroy_array(void *ptr[])
 {
     int rc;
-    MP_BARRIER();
+    MPI_Barrier(MPI_COMM_WORLD);
     rc = PARMCI_Free(ptr[me]);
     assert(rc==0);
 }
@@ -1773,7 +1709,7 @@ void test_vector_acc()
         dsc.dst_ptr_array = pdst;
         dsc.ptr_array_len = elems/2;
 
-        MP_BARRIER();
+        MPI_Barrier(MPI_COMM_WORLD);
         for(i=0;i<TIMES*nproc;i++){
 
             proc=0;
@@ -1794,7 +1730,7 @@ void test_vector_acc()
         }
 
         PARMCI_AllFence();
-        MP_BARRIER();
+        MPI_Barrier(MPI_COMM_WORLD);
 
 	assert(!PARMCI_Get((double*)b[proc], c, bytes, proc));
 
@@ -1802,7 +1738,7 @@ void test_vector_acc()
         scale_patch(scale, dim, a, &one, &elems, &elems);
 
         compare_patches(.0001, dim, a, &one, &elems, &elems, c, &one, &elems, &elems);
-        MP_BARRIER();
+        MPI_Barrier(MPI_COMM_WORLD);
 
         if(0==me){
             printf(" OK\n\n");
