@@ -1,19 +1,18 @@
-
-
-#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdint.h>
-#include <errno.h>
+#include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <execinfo.h>
 #include <limits.h>
 #include <math.h>
 #include <float.h>
 #include <assert.h>
 #include <unistd.h>
+
+#include <mpi.h>
 
 #define MAX(A,B) (((A) > (B)) ? A : B)
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
@@ -25,8 +24,6 @@ typedef long armci_size_t;
 #define ARMCII_MPI_SIZE_T MPI_LONG
 
 void  ARMCI_Error(const char *msg, int code);
-
-void  ARMCI_Copy(void *src, void *dst, int size);
 
 typedef struct armci_hdl_s
 {
@@ -67,17 +64,13 @@ int     PARMCI_Get(void *src, void *dst, int size, int target);
 int     PARMCI_AccV(int datatype, void *scale, armci_giov_t *iov, int iov_len, int proc);
 
 enum ARMCII_Op_e { ARMCII_OP_PUT, ARMCII_OP_GET, ARMCII_OP_ACC };
-
 enum ARMCII_Strided_methods_e { ARMCII_STRIDED_IOV, ARMCII_STRIDED_DIRECT };
-
-enum ARMCII_Iov_methods_e { ARMCII_IOV_AUTO, ARMCII_IOV_CONSRV,
-                            ARMCII_IOV_BATCHED, ARMCII_IOV_DIRECT };
-
+enum ARMCII_Iov_methods_e { ARMCII_IOV_AUTO, ARMCII_IOV_CONSRV, ARMCII_IOV_BATCHED, ARMCII_IOV_DIRECT };
 enum ARMCII_Shr_buf_methods_e { ARMCII_SHR_BUF_COPY, ARMCII_SHR_BUF_NOGUARD };
 
-extern char ARMCII_Strided_methods_str[][10];
-extern char ARMCII_Iov_methods_str[][10];
-extern char ARMCII_Shr_buf_methods_str[][10];
+char ARMCII_Strided_methods_str[][10] = { "IOV", "DIRECT" };
+char ARMCII_Iov_methods_str[][10]     = { "AUTO", "CONSRV", "BATCHED", "DIRECT" };
+char ARMCII_Shr_buf_methods_str[][10] = { "COPY", "NOGUARD" };
 
 typedef struct {
   int           init_count;
@@ -107,18 +100,15 @@ typedef struct {
   enum ARMCII_Shr_buf_methods_e shr_buf_method;
 } global_state_t;
 
-extern ARMCI_Group    ARMCI_GROUP_WORLD;
-extern ARMCI_Group    ARMCI_GROUP_DEFAULT;
-extern global_state_t ARMCII_GLOBAL_STATE;
+extern ARMCI_Group ARMCI_GROUP_WORLD;
+extern ARMCI_Group ARMCI_GROUP_DEFAULT;
 
-void  ARMCII_Bzero(void *buf, armci_size_t size);
 char *ARMCII_Getenv(const char *varname);
 int   ARMCII_Getenv_bool(const char *varname, int default_value);
 int   ARMCII_Getenv_int(const char *varname, int default_value);
 long  ARMCII_Getenv_long(const char *varname, long default_value);
 void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length);
 
-int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
 
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
@@ -183,10 +173,6 @@ void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req);
 
 global_state_t ARMCII_GLOBAL_STATE = { 0 };
 
-char ARMCII_Strided_methods_str[][10] = { "IOV", "DIRECT" };
-char ARMCII_Iov_methods_str[][10]     = { "AUTO", "CONSRV", "BATCHED", "DIRECT" };
-char ARMCII_Shr_buf_methods_str[][10] = { "COPY", "NOGUARD" };
-
 void ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...) {
   va_list ap;
   int  disp;
@@ -200,38 +186,6 @@ void ARMCII_Error_impl(const char *file, const int line, const char *func, const
   fprintf(stderr, "[%d] ARMCI Internal error in %s (%s:%d)\n[%d] Message: %s\n", ARMCI_GROUP_WORLD.rank,
       func, file, line, ARMCI_GROUP_WORLD.rank, string);
   MPI_Abort(ARMCI_GROUP_WORLD.comm, 100);
-}
-
-int ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank) {
-  int       group_rank;
-  MPI_Group world_group, sub_group;
-
-  ARMCII_Assert(world_rank >= 0 && world_rank < ARMCI_GROUP_WORLD.size);
-
-  if (group->comm == ARMCI_GROUP_WORLD.comm) {
-    group_rank = world_rank;
-    return group_rank;
-  }
-
-  else if (group->grp_to_abs != NULL) {
-    group_rank = group->abs_to_grp[world_rank];
-    return group_rank;
-  }
-  else {
-
-    MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
-    MPI_Comm_group(group->comm, &sub_group);
-
-    MPI_Group_translate_ranks(world_group, 1, &world_rank, sub_group, &group_rank);
-
-    MPI_Group_free(&world_group);
-    MPI_Group_free(&sub_group);
-  }
-
-  if (group_rank == MPI_UNDEFINED)
-    return -1;
-  else
-    return group_rank;
 }
 
 void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func) {
@@ -302,14 +256,6 @@ void PARMCI_AllFence(void) {
     cur_mreg = cur_mreg->next;
   }
   return;
-}
-
-void ARMCI_Copy(void *src, void *dst, int size) {
-  memmove(dst, src, size);
-}
-
-void ARMCII_Bzero(void *buf, armci_size_t size) {
-  memset(buf, 0, (size_t)size);
 }
 
 int ARMCII_Getenv_bool(const char *varname, int default_value) {
@@ -595,7 +541,7 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
   MPI_Info_free(&win_info);
 
   if (ARMCII_GLOBAL_STATE.debug_alloc && local_size > 0) {
-    ARMCII_Bzero(alloc_slices[alloc_me].base, local_size);
+    memset(alloc_slices[alloc_me].base, 0, (size_t)(local_size));
   }
 
   gmr_slice = alloc_slices[alloc_me];
@@ -683,7 +629,7 @@ void gmr_destroy(gmr_t *mreg, ARMCI_Group *group) {
   if (search_proc_out < 0)
     return;
 
-  search_proc_out_grp = ARMCII_Translate_absolute_to_group(group, search_proc_out);
+  search_proc_out_grp = search_proc_out;
 
   MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
 
@@ -767,7 +713,7 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
   gmr_size_t disp;
   MPI_Aint lb, extent;
 
-  grp_proc = ARMCII_Translate_absolute_to_group(&mreg->group, proc);
+  grp_proc = proc;
   ARMCII_Assert(grp_proc >= 0);
   ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
 
@@ -814,8 +760,8 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
 }
 
 int gmr_flush(gmr_t *mreg, int proc, int local_only) {
-  int grp_proc = ARMCII_Translate_absolute_to_group(&mreg->group, proc);
-  int grp_me   = ARMCII_Translate_absolute_to_group(&mreg->group, ARMCI_GROUP_WORLD.rank);
+  int grp_proc = proc;
+  int grp_me   = ARMCI_GROUP_WORLD.rank;
 
   ARMCII_Assert(grp_proc >= 0 && grp_me >= 0);
   ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
@@ -892,7 +838,7 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
   ARMCII_Assert_msg(src_mreg != NULL, "Invalid remote pointer");
 
   if (target == ARMCI_GROUP_WORLD.rank && dst_mreg == NULL) {
-    ARMCI_Copy(src, dst, size);
+    memmove(dst, src, size);
   }
 
   else if (dst_mreg == NULL) {
@@ -909,7 +855,7 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
     gmr_get(src_mreg, src, dst_buf, size, target, NULL  );
     gmr_flush(src_mreg, target, 0);
 
-    ARMCI_Copy(dst_buf, dst, size);
+    memmove(dst, dst_buf, size);
 
     MPI_Free_mem(dst_buf);
   }
@@ -1022,7 +968,7 @@ int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int coun
           /* inlined gmr_accumulate_typed: origin=base_loc_ptr+type_loc; target=window base
            * (disp 0) + type_rem, whose element offsets are relative to the window base. */
           MPI_Accumulate(base_loc_ptr, 1, type_loc,
-                         ARMCII_Translate_absolute_to_group(&mreg->group, proc), 0,
+                         proc, 0,
                          1, type_rem, MPI_SUM, mreg->window);
           flush_local = 1;
           break;
@@ -1104,7 +1050,7 @@ int ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count
         MPI_Alloc_mem(size, MPI_INFO_NULL, &new_bufs[i]);
         ARMCII_Assert(new_bufs[i] != NULL);
 
-        ARMCI_Copy(orig_bufs[i], new_bufs[i], size);
+        memmove(new_bufs[i], orig_bufs[i], size);
       }
 
       if (new_bufs[i] == orig_bufs[i])
