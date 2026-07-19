@@ -1264,106 +1264,6 @@ void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, v
   ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of the datatype size");
 }
 
-enum ARMCII_MPI_Impl_e { ARMCII_MPICH,
-                         ARMCII_OPEN_MPI,
-                         ARMCII_MVAPICH2,
-                         ARMCII_INTEL_MPI,
-                         ARMCII_CRAY_MPI,
-                         ARMCII_UNKNOWN_MPI };
-
-static void ARMCII_Parse_library_version(char * library_version, enum ARMCII_MPI_Impl_e * impl,
-                                         int * major, int * minor, char * patch)
-{
-    *impl  = ARMCII_UNKNOWN_MPI;
-    *major = -1;
-    *minor = -1;
-
-    int is_mpich = 0, is_ompi = 0, is_impi = 0;
-    {
-        char * p = NULL;
-        p = strstr(library_version,"MPICH");
-        is_mpich = (p != NULL);
-        p = strstr(library_version,"Open MPI");
-        is_ompi = (p != NULL);
-        p = strstr(library_version,"Intel(R) MPI Library");
-        is_impi = (p != NULL);
-    }
-
-    if (is_mpich) {
-      *impl = ARMCII_MPICH;
-      int mpich_major = 0;
-      int mpich_minor = 0;
-      char mpich_patch[4] = {0};
-      for (int major = 9; major >= 3; major--) {
-        for (int minor = 9; minor >= 0; minor--) {
-          char version_string[4] = {0};
-          sprintf(version_string,"%d.%d",major,minor);
-          char * p = strstr(library_version,version_string);
-          if (p != NULL) {
-            mpich_major = atoi(p);
-            mpich_minor = atoi(p+2);
-            strncpy(mpich_patch,p+3,4);
-            break;
-          }
-        }
-      }
-      *major = mpich_major;
-      *minor = mpich_minor;
-      strncpy(patch, mpich_patch, sizeof(mpich_patch));
-    }
-
-    if (is_ompi) {
-      *impl = ARMCII_OPEN_MPI;
-      int ompi_major = 0;
-      int ompi_minor = 0;
-      char ompi_patch[6] = {0};
-      for (int major = 9; major >= 2; major--) {
-        for (int minor = 9; minor >= 0; minor--) {
-          char version_string[4] = {0};
-          sprintf(version_string,"%d.%d",major,minor);
-          char * p = strstr(library_version,version_string);
-          if (p != NULL) {
-            ompi_major = atoi(p);
-            ompi_minor = atoi(p+2);
-            strncpy(ompi_patch,p+3,4);
-            for (int c=0; c<sizeof(ompi_patch); c++) {
-              if (ompi_patch[c] == ',') {
-                ompi_patch[c] = '\0';
-                break;
-              }
-            }
-            break;
-          }
-        }
-      }
-      *major = ompi_major;
-      *minor = ompi_minor;
-      strncpy(patch, ompi_patch, sizeof(ompi_patch));
-    }
-
-    if (is_impi) {
-      *impl = ARMCII_INTEL_MPI;
-      int impi_major = 0;
-      int impi_minor = 0;
-      char impi_patch[6] = {0};
-      for (int major = 2030; major >= 2000; major--) {
-        for (int minor = 30; minor >= 0; minor--) {
-          char version_string[7] = {0};
-          sprintf(version_string,"%d.%d",major,minor);
-          char * p = strstr(library_version,version_string);
-          if (p != NULL) {
-            impi_major = atoi(p);
-            impi_minor = atoi(p+5);
-            break;
-          }
-        }
-      }
-      *major = impi_major;
-      *minor = impi_minor;
-      *patch = '\0';
-    }
-}
-
 int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
 
   if (ARMCII_GLOBAL_STATE.init_count > 0) {
@@ -1387,24 +1287,9 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
 
   char mpi_library_version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
-  char mpi_library_version_short[32] = {0};
-  enum ARMCII_MPI_Impl_e mpi_implementation;
-  int mpi_impl_major = 0;
-  int mpi_impl_minor = 0;
-  char mpi_impl_patch[8] = {0};
   {
     int len;
     MPI_Get_library_version(mpi_library_version, &len);
-
-    strncpy(mpi_library_version_short, mpi_library_version, 31);
-    for (int c=0; c<sizeof(mpi_library_version_short); c++) {
-      if (mpi_library_version[c] == '\r' || mpi_library_version[c] == '\n') {
-        mpi_library_version_short[c] = '\0';
-        break;
-      }
-    }
-    ARMCII_Parse_library_version(mpi_library_version_short, &mpi_implementation,
-                                 &mpi_impl_major, &mpi_impl_minor, mpi_impl_patch);
   }
 
   {
@@ -1520,45 +1405,18 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   }
 
   ARMCII_GLOBAL_STATE.use_win_allocate = ARMCII_Getenv_bool("ARMCI_USE_WIN_ALLOCATE", 1);
-
   ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
-
   ARMCII_GLOBAL_STATE.memory_limit=ARMCII_Getenv_long("ARMCI_SHM_LIMIT", 0);
-
   ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
-
   ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
-
   ARMCII_GLOBAL_STATE.disable_shm_accumulate=ARMCII_Getenv_bool("ARMCI_DISABLE_SHM_ACC", 0);
-
   ARMCII_GLOBAL_STATE.use_same_op=ARMCII_Getenv_bool("ARMCI_USE_SAME_OP", 0);
-
   ARMCII_GLOBAL_STATE.rma_atomicity=ARMCII_Getenv_bool("ARMCI_RMA_ATOMICITY", 1);
-
-  ARMCII_Getenv_char(ARMCII_GLOBAL_STATE.rma_ordering, "ARMCI_RMA_ORDERING", "rar,raw,war,waw",
-                     sizeof(ARMCII_GLOBAL_STATE.rma_ordering)-1);
-
+  ARMCII_Getenv_char(ARMCII_GLOBAL_STATE.rma_ordering, "ARMCI_RMA_ORDERING", "rar,raw,war,waw", sizeof(ARMCII_GLOBAL_STATE.rma_ordering)-1);
   ARMCII_GLOBAL_STATE.end_to_end_flush=ARMCII_Getenv_bool("ARMCI_NO_FLUSH_LOCAL", 0);
-
   ARMCII_GLOBAL_STATE.rma_nocheck=ARMCII_Getenv_bool("ARMCI_RMA_NOCHECK", 1);
-
-#if defined(OPEN_MPI) && defined(OMPI_MAJOR_VERSION) && (OMPI_MAJOR_VERSION == 4)
-  const int use_request_atomics_default = 0;
-#else
-  const int use_request_atomics_default = 1;
-#endif
-  ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", use_request_atomics_default);
-#if defined(OPEN_MPI) && defined(OMPI_MAJOR_VERSION) && (OMPI_MAJOR_VERSION == 4)
-  if (ARMCII_GLOBAL_STATE.use_request_atomics) {
-      ARMCII_Warning("MPI request-based atomics are buggy with Open-MPI 4.x UCX on IB"
-		     " (https://github.com/open-mpi/ompi/issues/14173); "
-		     "set ARMCI_USE_REQUEST_ATOMICS=0 to disable.\n");
-  }
-#endif
-
+  ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", 1);
   ARMCII_GLOBAL_STATE.flush_request_atomics=ARMCII_Getenv_bool("ARMCI_FLUSH_REQUEST_ATOMICS", 0);
-
-  const int use_rma_requests = 1;
 
   ARMCII_GLOBAL_STATE.init_count++;
 
@@ -1571,24 +1429,9 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       printf("ARMCI-MPI initialized with %d process%s, MPI v%d.%d\n",
              ARMCI_GROUP_WORLD.size, ARMCI_GROUP_WORLD.size > 1 ? "es":"", major, minor);
 
-      if (ARMCII_GLOBAL_STATE.verbose > 1) {
         printf("=======\n");
         printf("  MPI library version    = %s", mpi_library_version);
         printf("=======\n");
-      } else {
-        if (mpi_implementation == ARMCII_OPEN_MPI) {
-          printf("  Open MPI version       = %d.%d%s\n", mpi_impl_major, mpi_impl_minor, mpi_impl_patch);
-        }
-        else if (mpi_implementation == ARMCII_MPICH) {
-          printf("  MPICH version          = %d.%d%s\n", mpi_impl_major, mpi_impl_minor, mpi_impl_patch);
-        }
-        else if (mpi_implementation == ARMCII_INTEL_MPI) {
-          printf("  Intel MPI version      = %d.%d%s\n", mpi_impl_major, mpi_impl_minor, mpi_impl_patch);
-        }
-        else if (mpi_implementation == ARMCII_UNKNOWN_MPI) {
-          printf("  Unknown MPI version    = %s\n", mpi_library_version);
-        }
-      }
 
       printf("  EXPLICIT_NB_PROGRESS   = %s\n", ARMCII_GLOBAL_STATE.explicit_nb_progress ? "ENABLED" : "DISABLED");
 
@@ -1654,7 +1497,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       printf("  MSG_BARRIER_SYNCS      = %s\n", ARMCII_GLOBAL_STATE.msg_barrier_syncs      ? "TRUE" : "FALSE");
       printf("  USE_REQUEST_ATOMICS    = %s\n", ARMCII_GLOBAL_STATE.use_request_atomics    ? "TRUE" : "FALSE");
       printf("  FLUSH_REQUEST_ATOMICS  = %s\n", ARMCII_GLOBAL_STATE.flush_request_atomics  ? "TRUE" : "FALSE");
-      printf("  USE_RMA_REQUESTS       = %s\n", use_rma_requests ? "TRUE" : "FALSE");
+      printf("  USE_RMA_REQUESTS       = %s\n", "TRUE");
 
       printf("  USE_ALLOC_SHM          = %s\n", ARMCII_GLOBAL_STATE.use_alloc_shm          ? "TRUE" : "FALSE");
       printf("  DISABLE_SHM_ACC        = %s\n", ARMCII_GLOBAL_STATE.disable_shm_accumulate ? "TRUE" : "FALSE");
@@ -1668,17 +1511,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       printf("  DEBUG_ALLOC            = %s\n", ARMCII_GLOBAL_STATE.debug_alloc            ? "TRUE" : "FALSE");
       printf("\n");
       fflush(NULL);
-    }
-
-    if ((ARMCII_GLOBAL_STATE.use_win_allocate == 1) && (ARMCI_GROUP_WORLD.rank == 0)) {
-
-        printf("  Warning: MPI_Win_allocate can lead to correctness issues.\n");
-        if ((mpi_implementation == ARMCII_MPICH) && (mpi_impl_major == 4)) {
-          printf("           There is a good chance your implementation is affected!\n");
-          printf("           See https://github.com/pmodels/mpich/issues/6110 for details.\n");
-        }
-        printf("\n");
-        fflush(NULL);
     }
 
     MPI_Barrier(ARMCI_GROUP_WORLD.comm);
