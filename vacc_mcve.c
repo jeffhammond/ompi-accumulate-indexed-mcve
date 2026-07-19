@@ -133,27 +133,12 @@ void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int
 
 int ARMCII_Is_win_unified(MPI_Win win);
 
-enum debug_cats_e {
-  DEBUG_CAT_ALL        =  -1,
-  DEBUG_CAT_NONE       =   0,
-  DEBUG_CAT_MEM_REGION = 0x1,
-  DEBUG_CAT_ALLOC      = 0x2,
-  DEBUG_CAT_MUTEX      = 0x4,
-  DEBUG_CAT_GROUPS     = 0x8,
-  DEBUG_CAT_CTREE      = 0x10,
-  DEBUG_CAT_IOV        = 0x20
-};
-
-extern  unsigned DEBUG_CATS_ENABLED;
-
 void    ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func);
 #define unlikely(x_) (x_)
 #define ARMCII_Assert(EXPR)          do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, NULL, __FILE__, __LINE__, __func__); } while(0)
 #define ARMCII_Assert_msg(EXPR, MSG) do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, MSG,  __FILE__, __LINE__, __func__); } while(0)
 
-#define DEBUG_CAT_ENABLED(X) (DEBUG_CATS_ENABLED & (X))
 void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
-#define ARMCII_Dbg_print(CAT,...) ((void)0)
 
 #define ARMCII_Error(...) ARMCII_Error_impl(__FILE__,__LINE__,__func__,__VA_ARGS__)
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
@@ -248,8 +233,6 @@ int ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank) {
   else
     return group_rank;
 }
-
-unsigned DEBUG_CATS_ENABLED = DEBUG_CAT_NONE;
 
 void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func) {
   int rank;
@@ -478,23 +461,6 @@ int ARMCI_Malloc_group(void **base_ptrs, armci_size_t size, ARMCI_Group *group) 
 
   mreg = gmr_create(size, base_ptrs, group);
 
-  if (DEBUG_CAT_ENABLED(DEBUG_CAT_ALLOC)) {
-#define BUF_LEN 1000
-    char ptr_string[BUF_LEN];
-    int  count = 0;
-
-    if (mreg == NULL) {
-      strncpy(ptr_string, "NULL", 5);
-    } else {
-      for (i = 0; i < mreg->nslices && count < BUF_LEN; i++)
-        count += snprintf(ptr_string+count, BUF_LEN-count,
-            (i == mreg->nslices-1) ? "%p" : "%p ", base_ptrs[i]);
-    }
-
-    ARMCII_Dbg_print(DEBUG_CAT_ALLOC, "base ptrs [%s]\n", ptr_string);
-#undef BUF_LEN
-  }
-
   return 0;
 }
 
@@ -505,7 +471,6 @@ int ARMCI_Free_group(void *ptr, ARMCI_Group *group) {
     mreg = gmr_lookup(ptr, ARMCI_GROUP_WORLD.rank);
     ARMCII_Assert_msg(mreg != NULL, "Invalid shared pointer");
   } else {
-    ARMCII_Dbg_print(DEBUG_CAT_ALLOC, "given NULL\n");
     mreg = NULL;
   }
   gmr_destroy(mreg, group);
