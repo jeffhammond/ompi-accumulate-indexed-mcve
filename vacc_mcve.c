@@ -133,8 +133,6 @@ int  ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int coun
                             int datatype, void *scale);
 void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int size);
 
-void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale);
-
 int ARMCII_Is_win_unified(MPI_Win win);
 
 enum debug_cats_e {
@@ -1138,7 +1136,12 @@ int ARMCII_Buf_prepare_acc_vec(void **orig_bufs, void ***new_bufs_ptr, int count
 
     for (i = 0; i < count; i++) {
       new_bufs[i] = contig + (MPI_Aint)i*size;
-      ARMCII_Buf_acc_scale(orig_bufs[i], new_bufs[i], size, datatype, scale);
+      { /* inlined ARMCII_Buf_acc_scale (ARMCI_ACC_DBL) */
+        int nelem = size / (int)sizeof(double);
+        double *s_in = (double*) orig_bufs[i], *s_out = (double*) new_bufs[i];
+        const double s = *((double*) scale);
+        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
+      }
     }
   } else {
     for (i = 0; i < count; i++) {
@@ -1182,15 +1185,6 @@ void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int
   }
 
   free(new_bufs);
-}
-
-void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale) {   /* ARMCI_ACC_DBL only */
-  int type_size; MPI_Type_size(MPI_DOUBLE, &type_size);
-  int nelem = size / type_size;
-  double *src = (double*) buf_in, *dst = (double*) buf_out;
-  const double s = *((double*) scale);
-  for (int j = 0; j < nelem; j++) dst[j] = src[j] * s;
-  ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of the datatype size");
 }
 
 int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
