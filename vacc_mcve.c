@@ -49,7 +49,6 @@ typedef struct {
   int       size;
 } ARMCI_Group;
 
-int     PARMCI_Init(void);
 int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
 int     PARMCI_Finalize(void);
 int     PARMCI_Get(void *src, void *dst, int size, int target);
@@ -70,10 +69,7 @@ typedef struct {
   int           iov_checks;
   int           iov_batched_limit;
   int           iov_dtype_chunk;
-  int           noncollective_groups;
-  int           cache_rank_translation;
   int           verbose;
-  int           thread_level;
   int           use_win_allocate;
   int           msg_barrier_syncs;
   int           explicit_nb_progress;
@@ -142,9 +138,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                   void *dst, int dst_count, MPI_Datatype dst_type,
                   int proc, armci_hdl_t * handle);
 
-int gmr_flush(gmr_t *mreg, int proc, int local_only);
-
-void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req);
 
 global_state_t ARMCII_GLOBAL_STATE = { 0 };
 
@@ -331,25 +324,6 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
       MPI_Info_set(win_info, "alloc_shm", "false");
   }
 
-  MPI_Info_set(win_info, "same_disp_unit", "true");
-
-  MPI_Info_set(win_info, "alloc_shared_noncontig", "false");
-
-  if ((ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_CONSRV ||
-       ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_BATCHED) &&
-      (ARMCII_GLOBAL_STATE.strided_method == ARMCII_STRIDED_IOV)) {
-      MPI_Info_set(win_info, "accumulate_noncontig_dtype", "false");
-  }
-
-  {
-      if (max_local_size > 2147483647) max_local_size = -1;
-      char max_local_size_string[16] = {0};
-      snprintf(max_local_size_string,sizeof(max_local_size_string)-1,"%ld",max_local_size);
-      MPI_Info_set(win_info, "accumulate_max_bytes", max_local_size_string);
-  }
-
-  MPI_Info_set(win_info, "epochs_used", "lockall");
-
   if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
 
       if (local_size == 0) {
@@ -365,7 +339,6 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
       MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &mreg->window);
 
       if (local_size == 0) {
-
         alloc_slices[alloc_me].base = NULL;
       } else {
         ARMCII_Assert(alloc_slices[alloc_me].base != NULL);
@@ -385,8 +358,9 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
   MPI_Allgather(  &gmr_slice, sizeof(gmr_slice_t), MPI_BYTE,
                  alloc_slices, sizeof(gmr_slice_t), MPI_BYTE, group->comm);
 
-  for (i = 0; i < alloc_nproc; i++)
+  for (i = 0; i < alloc_nproc; i++) {
     base_ptrs[i] = alloc_slices[i].base;
+  }
 
   memset(mreg->slices, 0, sizeof(gmr_slice_t)*world_nproc);
 
@@ -403,8 +377,7 @@ gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
   MPI_Group_free(&world_group);
   MPI_Group_free(&alloc_group);
 
-  MPI_Win_lock_all((ARMCII_GLOBAL_STATE.rma_nocheck) ? MPI_MODE_NOCHECK : 0,
-                   mreg->window);
+  MPI_Win_lock_all((ARMCII_GLOBAL_STATE.rma_nocheck) ? MPI_MODE_NOCHECK : 0, mreg->window);
 
   {
     int unified;
@@ -573,7 +546,47 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
                  mreg->window, &req);
     }
 
-    gmr_handle_add_request(handle, req);
+    { /* inlined gmr_handle_add_request(handle, req) */
+      if (handle->batch_size < 0) {
+
+        ARMCII_Warning("gmr_handle_add_request passed a bogus (uninitialized) handle.\n");
+
+      } else if (handle->batch_size == 0) {
+
+        if (handle->single_request != MPI_REQUEST_NULL) {
+          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
+        }
+
+        handle->batch_size     = 1;
+        handle->single_request = req;
+
+      } else if (handle->batch_size == 1) {
+
+        if (handle->single_request == MPI_REQUEST_NULL) {
+          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is MPI_REQUEST_NULL).\n");
+        }
+
+        handle->batch_size++;
+        handle->request_array    = malloc( handle->batch_size * sizeof(MPI_Request) );
+        handle->request_array[0] = handle->single_request;
+        handle->request_array[1] = req;
+        handle->single_request   = MPI_REQUEST_NULL;
+
+      } else if (handle->batch_size > 1) {
+
+        if (handle->single_request != MPI_REQUEST_NULL) {
+          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
+        }
+        if (handle->request_array == NULL) {
+          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (request_array is NULL).\n");
+        }
+
+        handle->batch_size++;
+        handle->request_array  = realloc( handle->request_array , handle->batch_size * sizeof(MPI_Request) );
+        handle->request_array[handle->batch_size-1] = req;
+
+      }
+    }
 
     return 0;
   }
@@ -587,72 +600,6 @@ int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
   }
 
   return 0;
-}
-
-int gmr_flush(gmr_t *mreg, int proc, int local_only) {
-  int grp_proc = proc;
-  int grp_me   = ARMCI_GROUP_WORLD.rank;
-
-  ARMCII_Assert(grp_proc >= 0 && grp_me >= 0);
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-  ARMCII_Assert_msg(grp_proc < mreg->group.size, "grp_proc exceeds group size!");
-
-  if (!local_only || ARMCII_GLOBAL_STATE.end_to_end_flush) {
-    MPI_Win_flush(grp_proc, mreg->window);
-  } else {
-    MPI_Win_flush_local(grp_proc, mreg->window);
-  }
-
-  return 0;
-}
-
-void gmr_handle_add_request(armci_hdl_t * handle, MPI_Request req)
-{
-  if (handle->batch_size < 0) {
-
-    ARMCII_Warning("gmr_handle_add_request passed a bogus (uninitialized) handle.\n");
-
-  } else if (handle->batch_size == 0) {
-
-    if (handle->single_request != MPI_REQUEST_NULL) {
-      ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
-    }
-    if (handle->request_array != NULL) {
-
-    }
-
-    handle->batch_size     = 1;
-    handle->single_request = req;
-
-  } else if (handle->batch_size == 1) {
-
-    if (handle->single_request == MPI_REQUEST_NULL) {
-      ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is MPI_REQUEST_NULL).\n");
-    }
-    if (handle->request_array != NULL) {
-
-    }
-
-    handle->batch_size++;
-    handle->request_array    = malloc( handle->batch_size * sizeof(MPI_Request) );
-    handle->request_array[0] = handle->single_request;
-    handle->request_array[1] = req;
-    handle->single_request   = MPI_REQUEST_NULL;
-
-  } else if (handle->batch_size > 1) {
-
-    if (handle->single_request != MPI_REQUEST_NULL) {
-      ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
-    }
-    if (handle->request_array == NULL) {
-      ARMCII_Warning("gmr_handle_add_request: handle is corrupt (request_array is NULL).\n");
-    }
-
-    handle->batch_size++;
-    handle->request_array  = realloc( handle->request_array , handle->batch_size * sizeof(MPI_Request) );
-    handle->request_array[handle->batch_size-1] = req;
-
-  }
 }
 
 int PARMCI_Get(void *src, void *dst, int size, int target) {
@@ -674,7 +621,12 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
   else if (dst_mreg == NULL) {
     ARMCII_Assert_msg(dst != NULL, "Invalid local address");
     gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, target, NULL);
-    gmr_flush(src_mreg, target, 0);
+    { /* inlined gmr_flush(src_mreg, target, local_only=0) -> full flush */
+      ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
+      ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+      ARMCII_Assert_msg(target < src_mreg->group.size, "grp_proc exceeds group size!");
+      MPI_Win_flush(target, src_mreg->window);
+    }
   }
 
   else {
@@ -682,13 +634,14 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
 
     MPI_Alloc_mem(size, MPI_INFO_NULL, &dst_buf);
     ARMCII_Assert(dst_buf != NULL);
-
-    ARMCII_Assert_msg(dst_buf != NULL, "Invalid local address");
     gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst_buf, size, MPI_BYTE, target, NULL);
-    gmr_flush(src_mreg, target, 0);
-
+    { /* inlined gmr_flush(src_mreg, target, local_only=0) -> full flush */
+      ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
+      ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+      ARMCII_Assert_msg(target < src_mreg->group.size, "grp_proc exceeds group size!");
+      MPI_Win_flush(target, src_mreg->window);
+    }
     memmove(dst, dst_buf, size);
-
     MPI_Free_mem(dst_buf);
   }
 
@@ -794,7 +747,15 @@ int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int coun
     }
 
     if (blocking) {
-      gmr_flush(mreg, proc, flush_local);
+      { /* inlined gmr_flush(mreg, proc, flush_local) */
+        ARMCII_Assert(proc >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
+        ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+        ARMCII_Assert_msg(proc < mreg->group.size, "grp_proc exceeds group size!");
+        if (!flush_local || ARMCII_GLOBAL_STATE.end_to_end_flush)
+          MPI_Win_flush(proc, mreg->window);
+        else
+          MPI_Win_flush_local(proc, mreg->window);
+      }
     }
 
     return 0;
@@ -917,42 +878,10 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       group->size =  0;
     }
 
-    if (ARMCII_GLOBAL_STATE.noncollective_groups && group->comm != MPI_COMM_NULL)
-      MPI_Comm_dup(group->comm, &group->noncoll_pgroup_comm);
-    else
-      group->noncoll_pgroup_comm = MPI_COMM_NULL;
+    group->noncoll_pgroup_comm = MPI_COMM_NULL;
 
-    if (ARMCII_GLOBAL_STATE.cache_rank_translation) {
-      if (group->comm != MPI_COMM_NULL) {
-        int      *ranks, i;
-        MPI_Group world_group, sub_group;
-
-        group->abs_to_grp = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
-        group->grp_to_abs = malloc(sizeof(int)*group->size);
-        ranks = malloc(sizeof(int)*ARMCI_GROUP_WORLD.size);
-
-        ARMCII_Assert(group->abs_to_grp != NULL && group->grp_to_abs != NULL && ranks != NULL);
-
-        for (i = 0; i < ARMCI_GROUP_WORLD.size; i++)
-          ranks[i] = i;
-
-        MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
-        MPI_Comm_group(group->comm, &sub_group);
-
-        MPI_Group_translate_ranks(sub_group, group->size, ranks, world_group, group->grp_to_abs);
-        MPI_Group_translate_ranks(world_group, ARMCI_GROUP_WORLD.size, ranks, sub_group, group->abs_to_grp);
-
-        MPI_Group_free(&world_group);
-        MPI_Group_free(&sub_group);
-
-        free(ranks);
-      }
-    }
-
-    else {
-      group->abs_to_grp = NULL;
-      group->grp_to_abs = NULL;
-    }
+    group->abs_to_grp = NULL;
+    group->grp_to_abs = NULL;
   }
   ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
 
@@ -964,21 +893,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
     MPI_Get_library_version(mpi_library_version, &len);
   }
 
-  {
-    int mpi_thread_level;
-    MPI_Query_thread(&mpi_thread_level);
-
-    if (mpi_thread_level<armci_requested) {
-      ARMCII_Error("MPI thread level below ARMCI thread level!");
-    }
-
-    ARMCII_GLOBAL_STATE.thread_level = armci_requested;
-
-  }
-
   ARMCII_GLOBAL_STATE.debug_alloc = ARMCII_Getenv_bool("ARMCI_DEBUG_ALLOC", 0);
-  ARMCII_GLOBAL_STATE.noncollective_groups = ARMCII_Getenv_bool("ARMCI_NONCOLLECTIVE_GROUPS", 0);
-  ARMCII_GLOBAL_STATE.cache_rank_translation = ARMCII_Getenv_bool("ARMCI_CACHE_RANK_TRANSLATION", 1);
 
   ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
   ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
@@ -1102,8 +1017,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
       printf("  USE_ALLOC_SHM          = %s\n", ARMCII_GLOBAL_STATE.use_alloc_shm          ? "TRUE" : "FALSE");
       printf("  IOV_CHECKS             = %s\n", ARMCII_GLOBAL_STATE.iov_checks             ? "TRUE" : "FALSE");
       printf("  SHR_BUF_METHOD         = %s\n", ARMCII_Shr_buf_methods_str[ARMCII_GLOBAL_STATE.shr_buf_method]);
-      printf("  NONCOLLECTIVE_GROUPS   = %s\n", ARMCII_GLOBAL_STATE.noncollective_groups   ? "TRUE" : "FALSE");
-      printf("  CACHE_RANK_TRANSLATION = %s\n", ARMCII_GLOBAL_STATE.cache_rank_translation ? "TRUE" : "FALSE");
       printf("  DEBUG_ALLOC            = %s\n", ARMCII_GLOBAL_STATE.debug_alloc            ? "TRUE" : "FALSE");
       printf("\n");
       fflush(NULL);
@@ -1113,10 +1026,6 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   }
 
   return 0;
-}
-
-int PARMCI_Init(void) {
-  return PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD);
 }
 
 int PARMCI_Finalize(void) {
@@ -1146,9 +1055,6 @@ int PARMCI_Finalize(void) {
     ARMCI_Group *group = &ARMCI_GROUP_WORLD;
     if (group->comm != MPI_COMM_NULL) {
       MPI_Comm_free(&group->comm);
-
-      if (ARMCII_GLOBAL_STATE.noncollective_groups)
-        MPI_Comm_free(&group->noncoll_pgroup_comm);
     }
 
     if (group->abs_to_grp != NULL)
@@ -1451,7 +1357,7 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &me);
     MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-    PARMCI_Init();
+    PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD);   /* inlined PARMCI_Init() */
     if (me == 0) printf("standalone test_vector_acc: %d procs\n", nproc);
     test_vector_acc();
     MPI_Barrier(MPI_COMM_WORLD);
