@@ -174,7 +174,7 @@ void    ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, 
 
 #define DEBUG_CAT_ENABLED(X) (DEBUG_CATS_ENABLED & (X))
 void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
-#define ARMCII_Dbg_print(CAT,...) do { if (DEBUG_CAT_ENABLED(CAT)) ARMCII_Dbg_print_impl(__func__,__VA_ARGS__); } while (0)
+#define ARMCII_Dbg_print(CAT,...) ((void)0)
 
 #define ARMCII_Error(...) ARMCII_Error_impl(__FILE__,__LINE__,__func__,__VA_ARGS__)
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
@@ -346,20 +346,6 @@ void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int
     while (MPI_Wtime() - stall < 1) ;
   }
   MPI_Abort(MPI_COMM_WORLD, -1);
-}
-
-void ARMCII_Dbg_print_impl(const char *func, const char *format, ...) {
-  va_list etc;
-  int  disp;
-  char string[500];
-
-  disp  = 0;
-  disp += snprintf(string, 500, "[%d] %s: ", ARMCI_GROUP_WORLD.rank, func);
-  va_start(etc, format);
-  disp += vsnprintf(string+disp, 500-disp, format, etc);
-  va_end(etc);
-
-  fprintf(stderr, "%s", string);
 }
 
 void ARMCII_Warning(const char *fmt, ...) {
@@ -867,60 +853,6 @@ gmr_t *gmr_lookup(void *ptr, int proc) {
   return mreg;
 }
 
-int gmr_put_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                  void *dst, int dst_count, MPI_Datatype dst_type,
-                  int proc, armci_hdl_t * handle)
-{
-  int        grp_proc;
-  gmr_size_t disp;
-  MPI_Aint lb, extent;
-
-  grp_proc = ARMCII_Translate_absolute_to_group(&mreg->group, proc);
-  ARMCII_Assert(grp_proc >= 0);
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-
-  if (dst == MPI_BOTTOM) {
-    disp = 0;
-  } else {
-    disp = (gmr_size_t) ((uint8_t*)dst - (uint8_t*)mreg->slices[proc].base);
-  }
-
-  MPI_Type_get_true_extent(dst_type, &lb, &extent);
-  ARMCII_Assert_msg(disp >= 0 && disp < mreg->slices[proc].size, "Invalid remote address");
-  ARMCII_Assert_msg(disp + dst_count*extent <= mreg->slices[proc].size, "Transfer is out of range");
-
-  if (handle!=NULL) {
-
-    MPI_Request req = MPI_REQUEST_NULL;
-
-    if (ARMCII_GLOBAL_STATE.rma_atomicity) {
-        MPI_Raccumulate(src, src_count, src_type, grp_proc,
-                        (MPI_Aint) disp, dst_count, dst_type,
-                        MPI_REPLACE, mreg->window, &req);
-    } else {
-        MPI_Rput(src, src_count, src_type, grp_proc,
-                 (MPI_Aint) disp, dst_count, dst_type,
-                 mreg->window, &req);
-    }
-
-    gmr_handle_add_request(handle, req);
-
-    return 0;
-
-  }
-
-  if (ARMCII_GLOBAL_STATE.rma_atomicity) {
-      MPI_Accumulate(src, src_count, src_type, grp_proc,
-                     (MPI_Aint) disp, dst_count, dst_type,
-                     MPI_REPLACE, mreg->window);
-  } else {
-      MPI_Put(src, src_count, src_type, grp_proc,
-              (MPI_Aint) disp, dst_count, dst_type, mreg->window);
-  }
-
-  return 0;
-}
-
 int gmr_get(gmr_t *mreg, void *src, void *dst, int size, int proc, armci_hdl_t * handle)
 {
   ARMCII_Assert_msg(dst != NULL, "Invalid local address");
@@ -1238,10 +1170,6 @@ int ARMCII_Iov_op_datatype(enum ARMCII_Op_e op, void **src, void **dst, int coun
       MPI_Type_commit(&type_rem);
 
       switch(op) {
-        case ARMCII_OP_PUT:
-          gmr_put_typed(mreg, base_loc_ptr, 1, type_loc, MPI_BOTTOM, 1, type_rem, proc, handle);
-          flush_local = 1;
-          break;
         case ARMCII_OP_GET:
           gmr_get_typed(mreg, MPI_BOTTOM, 1, type_rem, base_loc_ptr, 1, type_loc, proc, handle);
           flush_local = 0;
@@ -1977,14 +1905,6 @@ void ARMCI_Cleanup(void) {
 #define MAX(a,b) (((a) >= (b)) ? (a) : (b))
 #define MIN(a,b) (((a) <= (b)) ? (a) : (b))
 #define MAXDIMS 7
-#define OFF 1
-#define DIM1 5
-#define DIM2 3
-#define DIM3 8
-#define DIM4 9
-#define DIM5 7
-#define DIM6 3
-#define DIM7 2
 int me, nproc;
 void* work[MAXPROC];
 static void print_subscript(char *pre,int ndim, int subscript[], char* post)
