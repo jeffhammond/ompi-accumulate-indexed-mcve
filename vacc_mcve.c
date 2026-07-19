@@ -45,9 +45,6 @@ typedef struct {
   int    ptr_array_len;
 } armci_giov_t;
 
-enum ARMCI_Rmw_e { ARMCI_FETCH_AND_ADD, ARMCI_FETCH_AND_ADD_LONG,
-                   ARMCI_SWAP, ARMCI_SWAP_LONG };
-
 typedef struct {
   MPI_Comm  comm;
   MPI_Comm  noncoll_pgroup_comm;
@@ -61,10 +58,6 @@ void ARMCI_Group_free(ARMCI_Group *group);
 
 int ARMCI_Malloc_group(void **ptr_arr, armci_size_t bytes, ARMCI_Group *group);
 int ARMCI_Free_group(void *ptr, ARMCI_Group *group);
-
-enum armci_domain_e { ARMCI_DOMAIN_SMP };
-
-typedef int armci_domain_t;
 
 int     PARMCI_Init(void);
 int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
@@ -145,21 +138,6 @@ void ARMCII_Getenv_char(char * output, const char *varname, const char *default_
 int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
 
-typedef struct {
-
-  void *src;
-  void *dst;
-  int   stride_levels;
-
-  int  *base_ptr;
-  int  *src_stride_ar;
-  int  *dst_stride_ar;
-  int  *count;
-
-  int   was_contiguous;
-  int  *idx;
-} armcii_iov_iter_t;
-
 void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *type, int *type_size);
 
 int ARMCII_Iov_op_dispatch(enum ARMCII_Op_e op, void **src, void **dst, int count, int size,
@@ -201,20 +179,6 @@ void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 #define ARMCII_Error(...) ARMCII_Error_impl(__FILE__,__LINE__,__func__,__VA_ARGS__)
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
 void    ARMCII_Warning(const char *fmt, ...);
-
-enum armci_scope_e { SCOPE_ALL, SCOPE_NODE, SCOPE_MASTERS};
-
-enum armci_type_e  { ARMCI_INT, ARMCI_LONG, ARMCI_LONG_LONG, ARMCI_FLOAT, ARMCI_DOUBLE };
-
-struct armcix_mutex_hdl_s {
-  int         my_count;
-  int         max_count;
-  ARMCI_Group grp;
-  MPI_Win    *windows;
-  uint8_t   **bases;
-};
-
-typedef struct armcix_mutex_hdl_s * armcix_mutex_hdl_t;
 
 typedef armci_size_t gmr_size_t;
 #define GMR_MPI_SIZE_T ARMCII_MPI_SIZE_T
@@ -1543,8 +1507,6 @@ void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, v
 
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
 
-static armcix_mutex_hdl_t armci_mutex_hdl = NULL;
-
 enum ARMCII_MPI_Impl_e { ARMCII_MPICH,
                          ARMCII_OPEN_MPI,
                          ARMCII_MVAPICH2,
@@ -2186,15 +2148,6 @@ void destroy_array(void *ptr[])
     rc = PARMCI_Free(ptr[me]);
     assert(rc==0);
 }
-
-int loA[MAXDIMS], hiA[MAXDIMS];
-int dimsA[MAXDIMS]={DIM1,DIM2,DIM3,DIM4,DIM5,DIM6, DIM7};
-int loB[MAXDIMS], hiB[MAXDIMS];
-int dimsB[MAXDIMS]={EDIM1,EDIM2,EDIM3,EDIM4,EDIM5,EDIM6,EDIM7};
-int count[MAXDIMS];
-int strideA[MAXDIMS], strideB[MAXDIMS];
-int loC[MAXDIMS], hiC[MAXDIMS];
-int idx[MAXDIMS]={0,0,0,0,0,0,0};
 
 void GetPermutedProcList(int* ProcList)
 {
