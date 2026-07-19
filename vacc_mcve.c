@@ -372,10 +372,6 @@ typedef struct {
 
 extern ARMCI_Group    ARMCI_GROUP_WORLD;
 extern ARMCI_Group    ARMCI_GROUP_DEFAULT;
-extern MPI_Op         ARMCI_MPI_ABSMIN_OP;
-extern MPI_Op         ARMCI_MPI_ABSMAX_OP;
-extern MPI_Op         ARMCI_MPI_SELMIN_OP;
-extern MPI_Op         ARMCI_MPI_SELMAX_OP;
 extern global_state_t ARMCII_GLOBAL_STATE;
 
 void  ARMCII_Bzero(void *buf, armci_size_t size);
@@ -387,11 +383,6 @@ void ARMCII_Getenv_char(char * output, const char *varname, const char *default_
 
 void ARMCII_Sync_local(void);
 
-void ARMCII_Absmin_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
-void ARMCII_Absmax_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
-void ARMCII_Absv_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
-void ARMCII_Msg_sel_min_op(void *data_in, void *data_inout, int *len, MPI_Datatype *datatype);
-void ARMCII_Msg_sel_max_op(void *data_in, void *data_inout, int *len, MPI_Datatype *datatype);
 
 int  ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank);
 void ARMCII_Group_init_from_comm(ARMCI_Group *group);
@@ -1156,105 +1147,15 @@ typedef struct {
   uint8_t data[1];
 } sel_data_t;
 
-MPI_Op ARMCI_MPI_SELMIN_OP;
-MPI_Op ARMCI_MPI_SELMAX_OP;
 
-void ARMCII_Msg_sel_min_op(void *data_in, void *data_inout, int *len, MPI_Datatype *datatype) {
-  sel_data_t *sd_1, *sd_2;
 
-  sd_1 = (sel_data_t*) data_in;
-  sd_2 = (sel_data_t*) data_inout;
-
-  if (sd_1->contribute && !sd_2->contribute) {
-    ARMCI_Copy(data_in, data_inout, *len);
-  }
-
-  else if (sd_1->contribute && sd_2->contribute) {
-
-#define MSG_SEL_MIN_OP(X,Y,LEN,TYPE)                                      \
-  do {                                                                    \
-    if (*(TYPE*)((sel_data_t*)X)->data < *(TYPE*)((sel_data_t*)Y)->data)  \
-      ARMCI_Copy(X, Y, LEN);                                              \
-  } while (0)
-
-    switch (sd_1->type) {
-      case ARMCI_INT:
-        MSG_SEL_MIN_OP(data_in, data_inout, *len, int);
-        break;
-      case ARMCI_LONG:
-        MSG_SEL_MIN_OP(data_in, data_inout, *len, long);
-        break;
-      case ARMCI_LONG_LONG:
-        MSG_SEL_MIN_OP(data_in, data_inout, *len, long long);
-        break;
-      case ARMCI_FLOAT:
-        MSG_SEL_MIN_OP(data_in, data_inout, *len, float);
-        break;
-      case ARMCI_DOUBLE:
-        MSG_SEL_MIN_OP(data_in, data_inout, *len, double);
-        break;
-      default:
-        ARMCII_Error("Invalid data type (%d)", sd_1->type);
-    }
-
-#undef MSG_SEL_MIN_OP
-  }
-
-}
-
-void ARMCII_Msg_sel_max_op(void *data_in, void *data_inout, int *len, MPI_Datatype *datatype) {
-  sel_data_t *sd_1, *sd_2;
-
-  sd_1 = (sel_data_t*) data_in;
-  sd_2 = (sel_data_t*) data_inout;
-
-  if (sd_1->contribute && !sd_2->contribute) {
-    ARMCI_Copy(data_in, data_inout, *len);
-  }
-
-  else if (sd_1->contribute && sd_2->contribute) {
-
-#define MSG_SEL_MAX_OP(X,Y,LEN,TYPE)                                      \
-  do {                                                                    \
-    if (*(TYPE*)((sel_data_t*)X)->data > *(TYPE*)((sel_data_t*)Y)->data)  \
-      ARMCI_Copy(X, Y, LEN);                                              \
-  } while (0)
-
-    switch (sd_1->type) {
-      case ARMCI_INT:
-        MSG_SEL_MAX_OP(data_in, data_inout, *len, int);
-        break;
-      case ARMCI_LONG:
-        MSG_SEL_MAX_OP(data_in, data_inout, *len, long);
-        break;
-      case ARMCI_LONG_LONG:
-        MSG_SEL_MAX_OP(data_in, data_inout, *len, long long);
-        break;
-      case ARMCI_FLOAT:
-        MSG_SEL_MAX_OP(data_in, data_inout, *len, float);
-        break;
-      case ARMCI_DOUBLE:
-        MSG_SEL_MAX_OP(data_in, data_inout, *len, double);
-        break;
-      default:
-        ARMCII_Error("Invalid data type (%d)", sd_1->type);
-    }
-
-#undef MSG_SEL_MIN_OP
-  }
-
-}
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
 
-MPI_Op ARMCI_MPI_ABSMIN_OP;
-MPI_Op ARMCI_MPI_ABSMAX_OP;
 
-#define IABS(X)  (((X) > 0  ) ? X : -X)
-#define FABS(X)  (((X) > 0.0) ? X : -X)
 #define MIN(X,Y) (((X) < (Y)) ? X : Y)
 #define MAX(X,Y) (((X) > (Y)) ? X : Y)
 
@@ -1270,24 +1171,6 @@ MPI_Op ARMCI_MPI_ABSMAX_OP;
         }                                       \
       } while (0)
 
-void ARMCII_Absmin_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype) {
-  const int    count = *len;
-  MPI_Datatype dt    = *datatype;
-
-  if (dt == MPI_INT) {
-      ABSMIN(invec, inoutvec, count, int, IABS);
-  } else if (dt == MPI_LONG) {
-      ABSMIN(invec, inoutvec, count, long, IABS);
-  } else if (dt == MPI_LONG_LONG) {
-      ABSMIN(invec, inoutvec, count, long long, IABS);
-  } else if (dt == MPI_FLOAT) {
-      ABSMIN(invec, inoutvec, count, float, FABS);
-  } else if (dt == MPI_DOUBLE) {
-      ABSMIN(invec, inoutvec, count, double, FABS);
-  } else {
-      ARMCII_Error("unknown type (%d)", *datatype);
-  }
-}
 
 #undef ABSMIN
 
@@ -1303,24 +1186,6 @@ void ARMCII_Absmin_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datat
         }                                       \
       } while (0)
 
-void ARMCII_Absmax_op(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype) {
-  const int    count = *len;
-  MPI_Datatype dt    = *datatype;
-
-  if (dt == MPI_INT) {
-      ABSMAX(invec, inoutvec, count, int, IABS);
-  } else if (dt == MPI_LONG) {
-      ABSMAX(invec, inoutvec, count, long, IABS);
-  } else if (dt == MPI_LONG_LONG) {
-      ABSMAX(invec, inoutvec, count, long long, IABS);
-  } else if (dt == MPI_FLOAT) {
-      ABSMAX(invec, inoutvec, count, float, FABS);
-  } else if (dt == MPI_DOUBLE) {
-      ABSMAX(invec, inoutvec, count, double, FABS);
-  } else {
-      ARMCII_Error("unknown type (%d)", *datatype);
-  }
-}
 
 #undef ABSMAX
 
@@ -2685,11 +2550,7 @@ int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
   ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD);
   ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
 
-  MPI_Op_create(ARMCII_Absmin_op, 1  , &ARMCI_MPI_ABSMIN_OP);
-  MPI_Op_create(ARMCII_Absmax_op, 1  , &ARMCI_MPI_ABSMAX_OP);
 
-  MPI_Op_create(ARMCII_Msg_sel_min_op, 1  , &ARMCI_MPI_SELMIN_OP);
-  MPI_Op_create(ARMCII_Msg_sel_max_op, 1  , &ARMCI_MPI_SELMAX_OP);
 
   ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
 
@@ -3021,11 +2882,7 @@ int PARMCI_Finalize(void) {
     ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
   }
 
-  MPI_Op_free(&ARMCI_MPI_ABSMIN_OP);
-  MPI_Op_free(&ARMCI_MPI_ABSMAX_OP);
 
-  MPI_Op_free(&ARMCI_MPI_SELMIN_OP);
-  MPI_Op_free(&ARMCI_MPI_SELMAX_OP);
 
   ARMCI_Cleanup();
 
