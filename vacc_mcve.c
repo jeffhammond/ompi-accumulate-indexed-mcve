@@ -1159,35 +1159,7 @@ typedef struct {
 #define MIN(X,Y) (((X) < (Y)) ? X : Y)
 #define MAX(X,Y) (((X) > (Y)) ? X : Y)
 
-#define ABSMIN(IN,INOUT,COUNT,DTYPE,ABSOP)      \
-      do {                                      \
-        int i;                                  \
-        DTYPE *in = (DTYPE *)IN;                \
-        DTYPE *io = (DTYPE *)INOUT;             \
-        for (i = 0; i < COUNT; i++) {           \
-          const DTYPE x = ABSOP(in[i]);         \
-          const DTYPE y = ABSOP(io[i]);         \
-          io[i] = MIN(x,y);                     \
-        }                                       \
-      } while (0)
 
-
-#undef ABSMIN
-
-#define ABSMAX(IN,INOUT,COUNT,DTYPE,ABSOP)      \
-      do {                                      \
-        int i;                                  \
-        DTYPE *in = (DTYPE *)IN;                \
-        DTYPE *io = (DTYPE *)INOUT;             \
-        for (i = 0; i < COUNT; i++) {           \
-          const DTYPE x = ABSOP(in[i]);         \
-          const DTYPE y = ABSOP(io[i]);         \
-          io[i] = MAX(x,y);                     \
-        }                                       \
-      } while (0)
-
-
-#undef ABSMAX
 
 #define ABSV(IN,INOUT,COUNT,DTYPE,ABSOP)        \
       do {                                      \
