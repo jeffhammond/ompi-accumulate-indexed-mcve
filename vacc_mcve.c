@@ -276,31 +276,7 @@ int ARMCII_Translate_absolute_to_group(ARMCI_Group *group, int world_rank) {
 }
 
 void ARMCII_Acc_type_translate(int armci_datatype, MPI_Datatype *mpi_type, int *type_size) {
-
-    switch (armci_datatype) {
-      case ARMCI_ACC_INT:
-        *mpi_type = MPI_INT;
-        break;
-      case ARMCI_ACC_LNG:
-        *mpi_type = MPI_LONG;
-        break;
-      case ARMCI_ACC_FLT:
-        *mpi_type = MPI_FLOAT;
-        break;
-      case ARMCI_ACC_DBL:
-        *mpi_type = MPI_DOUBLE;
-        break;
-      case ARMCI_ACC_CPL:
-        *mpi_type = MPI_FLOAT;
-        break;
-      case ARMCI_ACC_DCP:
-        *mpi_type = MPI_DOUBLE;
-        break;
-      default:
-        ARMCII_Error("unknown data type", 100);
-        return;
-    }
-
+    *mpi_type = MPI_DOUBLE;   /* only ARMCI_ACC_DBL is used */
     MPI_Type_size(*mpi_type, type_size);
 }
 
@@ -1279,156 +1255,17 @@ void ARMCII_Buf_finish_acc_vec(void **orig_bufs, void **new_bufs, int count, int
   free(new_bufs);
 }
 
-int ARMCII_Buf_acc_is_scaled(int datatype, void *scale) {
-  switch (datatype) {
-    case ARMCI_ACC_INT:
-      if (*((int*)scale) == 1)
-        return 0;
-      break;
-
-    case ARMCI_ACC_LNG:
-      if (*((long*)scale) == 1)
-        return 0;
-      break;
-
-    case ARMCI_ACC_FLT:
-      if (fabsf(*((float*)scale)-1.0f) < FLT_EPSILON)
-        return 0;
-      break;
-
-    case ARMCI_ACC_DBL:
-      if (fabs(*((double*)scale)-1.0) < DBL_EPSILON)
-        return 0;
-      break;
-
-    case ARMCI_ACC_CPL:
-      if (fabsf(((float*)scale)[0]-1.0f) < FLT_EPSILON &&
-          fabsf(((float*)scale)[1]-0.0f) < FLT_EPSILON)
-        return 0;
-      break;
-
-    case ARMCI_ACC_DCP:
-      if (fabs(((double*)scale)[0]-1.0) < DBL_EPSILON &&
-          fabs(((double*)scale)[1]-0.0) < DBL_EPSILON)
-        return 0;
-      break;
-
-    default:
-      ARMCII_Error("unknown data type (%d)", datatype);
-  }
-
-  return 1;
+int ARMCII_Buf_acc_is_scaled(int datatype, void *scale) {   /* ARMCI_ACC_DBL only */
+  return (fabs(*((double*)scale) - 1.0) < DBL_EPSILON) ? 0 : 1;
 }
 
-void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale) {
-  int   j, nelem;
-  int   type_size = -1;
-
-  switch (datatype) {
-    case ARMCI_ACC_INT:
-      MPI_Type_size(MPI_INT, &type_size);
-      nelem= size/type_size;
-
-      {
-        int *src_i = (int*) buf_in;
-        int *scl_i = (int*) buf_out;
-        const int s = *((int*) scale);
-
-        for (j = 0; j < nelem; j++)
-          scl_i[j] = src_i[j]*s;
-      }
-      break;
-
-    case ARMCI_ACC_LNG:
-      MPI_Type_size(MPI_LONG, &type_size);
-      nelem= size/type_size;
-
-      {
-        long *src_l = (long*) buf_in;
-        long *scl_l = (long*) buf_out;
-        const long s = *((long*) scale);
-
-        for (j = 0; j < nelem; j++)
-          scl_l[j] = src_l[j]*s;
-      }
-      break;
-
-    case ARMCI_ACC_FLT:
-      MPI_Type_size(MPI_FLOAT, &type_size);
-      nelem= size/type_size;
-
-      {
-        float *src_f = (float*) buf_in;
-        float *scl_f = (float*) buf_out;
-        const float s = *((float*) scale);
-
-        for (j = 0; j < nelem; j++)
-          scl_f[j] = src_f[j]*s;
-      }
-      break;
-
-    case ARMCI_ACC_DBL:
-      MPI_Type_size(MPI_DOUBLE, &type_size);
-      nelem= size/type_size;
-
-      {
-        double *src_d = (double*) buf_in;
-        double *scl_d = (double*) buf_out;
-        const double s = *((double*) scale);
-
-        for (j = 0; j < nelem; j++)
-          scl_d[j] = src_d[j]*s;
-      }
-      break;
-
-    case ARMCI_ACC_CPL:
-      MPI_Type_size(MPI_FLOAT, &type_size);
-      nelem= size/type_size;
-
-      {
-        float *src_fc = (float*) buf_in;
-        float *scl_fc = (float*) buf_out;
-        const float s_r = ((float*)scale)[0];
-        const float s_c = ((float*)scale)[1];
-
-        for (j = 0; j < nelem; j += 2) {
-
-          const float src_fc_j   = src_fc[j];
-          const float src_fc_j_1 = src_fc[j+1];
-
-          scl_fc[j]   = src_fc_j*s_r   - src_fc_j_1*s_c;
-          scl_fc[j+1] = src_fc_j_1*s_r + src_fc_j*s_c;
-        }
-      }
-      break;
-
-    case ARMCI_ACC_DCP:
-      MPI_Type_size(MPI_DOUBLE, &type_size);
-      nelem= size/type_size;
-
-      {
-        double *src_dc = (double*) buf_in;
-        double *scl_dc = (double*) buf_out;
-        const double s_r = ((double*)scale)[0];
-        const double s_c = ((double*)scale)[1];
-
-        for (j = 0; j < nelem; j += 2) {
-
-          const double src_dc_j   = src_dc[j];
-          const double src_dc_j_1 = src_dc[j+1];
-
-          scl_dc[j]   = src_dc_j*s_r   - src_dc_j_1*s_c;
-          scl_dc[j+1] = src_dc_j_1*s_r + src_dc_j*s_c;
-        }
-      }
-      break;
-
-    default:
-      ARMCII_Error("unknown data type (%d)", datatype);
-  }
-
-  ARMCII_Assert_msg(size % type_size == 0,
-      "Transfer size is not a multiple of the datatype size");
+void ARMCII_Buf_acc_scale(void *buf_in, void *buf_out, int size, int datatype, void *scale) {   /* ARMCI_ACC_DBL only */
+  int type_size; MPI_Type_size(MPI_DOUBLE, &type_size);
+  int nelem = size / type_size;
+  double *src = (double*) buf_in, *dst = (double*) buf_out;
+  const double s = *((double*) scale);
+  for (int j = 0; j < nelem; j++) dst[j] = src[j] * s;
+  ARMCII_Assert_msg(size % type_size == 0, "Transfer size is not a multiple of the datatype size");
 }
 
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
