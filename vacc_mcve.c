@@ -127,12 +127,7 @@ typedef struct gmr_s {
 
 extern gmr_t *gmr_list;
 
-gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group);
-void   gmr_destroy(gmr_t *mreg, ARMCI_Group *group);
 
-int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                  void *dst, int dst_count, MPI_Datatype dst_type,
-                  int proc, armci_hdl_t * handle);
 
 
 global_state_t ARMCII_GLOBAL_STATE = { 0 };
@@ -264,331 +259,6 @@ ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
 
 gmr_t *gmr_list = NULL;
 
-gmr_t *gmr_create(gmr_size_t local_size, void **base_ptrs, ARMCI_Group *group) {
-  int           i;
-  int           alloc_me, alloc_nproc;
-  int           world_me, world_nproc;
-  MPI_Group     world_group, alloc_group;
-  gmr_t        *mreg;
-  gmr_slice_t  *alloc_slices, gmr_slice;
-
-  ARMCII_Assert(local_size >= 0);
-  ARMCII_Assert(group != NULL);
-
-  MPI_Comm_rank(group->comm, &alloc_me);
-  MPI_Comm_size(group->comm, &alloc_nproc);
-
-  gmr_size_t max_local_size;
-  {
-
-    MPI_Allreduce(&local_size, &max_local_size, 1, GMR_MPI_SIZE_T, MPI_MAX, group->comm);
-
-    if (max_local_size==0) {
-      for (i = 0; i < alloc_nproc; i++) {
-        base_ptrs[i] = NULL;
-      }
-      return NULL;
-    }
-  }
-
-  MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
-  MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
-
-  mreg = malloc(sizeof(gmr_t));
-  ARMCII_Assert(mreg != NULL);
-
-  mreg->slices = malloc(sizeof(gmr_slice_t)*world_nproc);
-  ARMCII_Assert(mreg->slices != NULL);
-  alloc_slices = malloc(sizeof(gmr_slice_t)*alloc_nproc);
-  ARMCII_Assert(alloc_slices != NULL);
-
-  mreg->group          = *group;
-
-  mreg->nslices        = world_nproc;
-  mreg->prev           = NULL;
-  mreg->next           = NULL;
-  mreg->unified        = false;
-
-  alloc_slices[alloc_me].size = local_size;
-
-  MPI_Info win_info = MPI_INFO_NULL;
-  MPI_Info_create(&win_info);
-
-  if (ARMCII_GLOBAL_STATE.use_alloc_shm) {
-      MPI_Info_set(win_info, "alloc_shm", "true");
-  } else {
-      MPI_Info_set(win_info, "alloc_shm", "false");
-  }
-
-  if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
-
-      if (local_size == 0) {
-        alloc_slices[alloc_me].base = NULL;
-      } else {
-        MPI_Alloc_mem(local_size, win_info, &(alloc_slices[alloc_me].base));
-        ARMCII_Assert(alloc_slices[alloc_me].base != NULL);
-      }
-      MPI_Win_create(alloc_slices[alloc_me].base, (MPI_Aint) local_size, 1, MPI_INFO_NULL, group->comm, &mreg->window);
-  }
-  else if (ARMCII_GLOBAL_STATE.use_win_allocate == 1) {
-
-      MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &mreg->window);
-
-      if (local_size == 0) {
-        alloc_slices[alloc_me].base = NULL;
-      } else {
-        ARMCII_Assert(alloc_slices[alloc_me].base != NULL);
-      }
-  }
-  else {
-      ARMCII_Error("invalid window type!\n");
-  }
-
-  MPI_Info_free(&win_info);
-
-  if (ARMCII_GLOBAL_STATE.debug_alloc && local_size > 0) {
-    memset(alloc_slices[alloc_me].base, 0, (size_t)(local_size));
-  }
-
-  gmr_slice = alloc_slices[alloc_me];
-  MPI_Allgather(  &gmr_slice, sizeof(gmr_slice_t), MPI_BYTE,
-                 alloc_slices, sizeof(gmr_slice_t), MPI_BYTE, group->comm);
-
-  for (i = 0; i < alloc_nproc; i++) {
-    base_ptrs[i] = alloc_slices[i].base;
-  }
-
-  memset(mreg->slices, 0, sizeof(gmr_slice_t)*world_nproc);
-
-  MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
-  MPI_Comm_group(group->comm, &alloc_group);
-
-  for (i = 0; i < alloc_nproc; i++) {
-    int world_rank;
-    MPI_Group_translate_ranks(alloc_group, 1, &i, world_group, &world_rank);
-    mreg->slices[world_rank] = alloc_slices[i];
-  }
-
-  free(alloc_slices);
-  MPI_Group_free(&world_group);
-  MPI_Group_free(&alloc_group);
-
-  MPI_Win_lock_all((ARMCII_GLOBAL_STATE.rma_nocheck) ? MPI_MODE_NOCHECK : 0, mreg->window);
-
-  {
-    int unified;
-    { /* inlined ARMCII_Is_win_unified(mreg->window) */
-      void *attr_ptr; int attr_flag;
-      MPI_Win_get_attr(mreg->window, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
-      if (attr_flag) {
-        int *attr_val = (int*)attr_ptr;
-        if      ((*attr_val)==MPI_WIN_UNIFIED) unified = 1;
-        else if ((*attr_val)==MPI_WIN_UNIFIED) unified = 0;
-        else                                   unified = -1;
-      } else unified = -1;
-    }
-    const int print = ARMCII_GLOBAL_STATE.verbose;
-    if (unified == 1) {
-        mreg->unified = true;
-        if (print > 1) printf("MPI_WIN_MODEL = MPI_WIN_UNIFIED\n");
-    } else if (unified == 0) {
-        mreg->unified = false;
-        if (print > 1) printf("MPI_WIN_MODEL = MPI_WIN_SEPARATE\n");
-    } else {
-        mreg->unified = false;
-        if (print > 1) printf("MPI_WIN_MODEL not available\n");
-    }
-    if (!(mreg->unified) && (ARMCII_GLOBAL_STATE.shr_buf_method == ARMCII_SHR_BUF_NOGUARD) ) {
-      if (world_me==0) {
-        printf("Please re-run with ARMCI_SHR_BUF_METHOD=COPY\n");
-      }
-
-    }
-  }
-
-  if (gmr_list == NULL) {
-    gmr_list = mreg;
-
-  } else {
-    gmr_t *parent = gmr_list;
-
-    while (parent->next != NULL)
-      parent = parent->next;
-
-    parent->next = mreg;
-    mreg->prev   = parent;
-  }
-
-  return mreg;
-}
-
-void gmr_destroy(gmr_t *mreg, ARMCI_Group *group) {
-  int   search_proc_in, search_proc_out, search_proc_out_grp;
-  void *search_base = NULL;
-  int   alloc_me, alloc_nproc;
-  int   world_me, world_nproc;
-
-  MPI_Comm_rank(group->comm, &alloc_me);
-  MPI_Comm_size(group->comm, &alloc_nproc);
-  MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
-  MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
-
-  if (mreg == NULL)
-    search_proc_in = -1;
-  else {
-    search_proc_in = world_me;
-    search_base    = mreg->slices[world_me].base;
-  }
-
-  MPI_Allreduce(&search_proc_in, &search_proc_out, 1, MPI_INT, MPI_MAX, group->comm);
-
-  if (search_proc_out < 0)
-    return;
-
-  search_proc_out_grp = search_proc_out;
-
-  MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
-
-  if (mreg == NULL) {
-    /* inlined gmr_lookup(search_base, search_proc_out) */
-    void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
-    gmr_t *m = gmr_list;
-    while (m != NULL) {
-      ARMCII_Assert(lk_proc < m->nslices);
-      if (lk_proc < m->nslices) {
-        const uint8_t   *base = m->slices[lk_proc].base;
-        const gmr_size_t sz   = m->slices[lk_proc].size;
-        if ((uint8_t*)lk_ptr >= base && (uint8_t*)lk_ptr < base + sz) break;
-      }
-      m = m->next;
-    }
-    mreg = m;
-  }
-
-  ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
-
-  if (mreg->prev == NULL) {
-    ARMCII_Assert(gmr_list == mreg);
-    gmr_list = mreg->next;
-
-    if (mreg->next != NULL)
-      mreg->next->prev = NULL;
-
-  } else {
-    mreg->prev->next = mreg->next;
-    if (mreg->next != NULL)
-      mreg->next->prev = mreg->prev;
-  }
-
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-  MPI_Win_unlock_all(mreg->window);
-
-  MPI_Win_free(&mreg->window);
-
-  if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
-    if (mreg->slices[world_me].base != NULL) {
-      MPI_Free_mem(mreg->slices[world_me].base);
-    }
-  }
-
-  free(mreg->slices);
-  free(mreg);
-}
-
-int gmr_get_typed(gmr_t *mreg, void *src, int src_count, MPI_Datatype src_type,
-                  void *dst, int dst_count, MPI_Datatype dst_type,
-                  int proc, armci_hdl_t * handle)
-{
-  int        grp_proc;
-  gmr_size_t disp;
-  MPI_Aint lb, extent;
-
-  grp_proc = proc;
-  ARMCII_Assert(grp_proc >= 0);
-  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-
-  if (src == MPI_BOTTOM) {
-    disp = 0;
-  } else {
-    disp = (gmr_size_t) ((uint8_t*)src - (uint8_t*)mreg->slices[proc].base);
-  }
-
-  MPI_Type_get_true_extent(src_type, &lb, &extent);
-  ARMCII_Assert_msg(disp >= 0 && disp < mreg->slices[proc].size, "Invalid remote address");
-  ARMCII_Assert_msg(disp + src_count*extent <= mreg->slices[proc].size, "Transfer is out of range");
-
-  if (handle!=NULL) {
-
-    MPI_Request req = MPI_REQUEST_NULL;
-
-    if (ARMCII_GLOBAL_STATE.rma_atomicity) {
-
-        MPI_Rget_accumulate(NULL, 0, src_type  ,
-                            dst, dst_count, dst_type, grp_proc,
-                            (MPI_Aint) disp, src_count, src_type,
-                            MPI_NO_OP, mreg->window, &req);
-    } else {
-        MPI_Rget(dst, dst_count, dst_type, grp_proc,
-                 (MPI_Aint) disp, src_count, src_type,
-                 mreg->window, &req);
-    }
-
-    { /* inlined gmr_handle_add_request(handle, req) */
-      if (handle->batch_size < 0) {
-
-        ARMCII_Warning("gmr_handle_add_request passed a bogus (uninitialized) handle.\n");
-
-      } else if (handle->batch_size == 0) {
-
-        if (handle->single_request != MPI_REQUEST_NULL) {
-          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
-        }
-
-        handle->batch_size     = 1;
-        handle->single_request = req;
-
-      } else if (handle->batch_size == 1) {
-
-        if (handle->single_request == MPI_REQUEST_NULL) {
-          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is MPI_REQUEST_NULL).\n");
-        }
-
-        handle->batch_size++;
-        handle->request_array    = malloc( handle->batch_size * sizeof(MPI_Request) );
-        handle->request_array[0] = handle->single_request;
-        handle->request_array[1] = req;
-        handle->single_request   = MPI_REQUEST_NULL;
-
-      } else if (handle->batch_size > 1) {
-
-        if (handle->single_request != MPI_REQUEST_NULL) {
-          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (single_request_array is not MPI_REQUEST_NULL).\n");
-        }
-        if (handle->request_array == NULL) {
-          ARMCII_Warning("gmr_handle_add_request: handle is corrupt (request_array is NULL).\n");
-        }
-
-        handle->batch_size++;
-        handle->request_array  = realloc( handle->request_array , handle->batch_size * sizeof(MPI_Request) );
-        handle->request_array[handle->batch_size-1] = req;
-
-      }
-    }
-
-    return 0;
-  }
-
-  if (ARMCII_GLOBAL_STATE.rma_atomicity) {
-      MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, dst_count, dst_type, grp_proc,
-                         (MPI_Aint) disp, src_count, src_type, MPI_NO_OP, mreg->window);
-  } else {
-      MPI_Get(dst, dst_count, dst_type, grp_proc,
-              (MPI_Aint) disp, src_count, src_type, mreg->window);
-  }
-
-  return 0;
-}
-
 int PARMCI_Get(void *src, void *dst, int size, int target) {
   gmr_t *src_mreg, *dst_mreg;
 
@@ -633,7 +303,24 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
 
   else if (dst_mreg == NULL) {
     ARMCII_Assert_msg(dst != NULL, "Invalid local address");
-    gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, target, NULL);
+    { /* inlined gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst, size, MPI_BYTE, target, NULL) */
+      gmr_t *gt_mreg = src_mreg;
+      int grp_proc = target;
+      gmr_size_t disp;
+      MPI_Aint lb, extent;
+      ARMCII_Assert(grp_proc >= 0);
+      ARMCII_Assert_msg(gt_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+      if (src == MPI_BOTTOM) disp = 0;
+      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
+      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
+      ARMCII_Assert_msg(disp >= 0 && disp < gt_mreg->slices[target].size, "Invalid remote address");
+      ARMCII_Assert_msg(disp + size*extent <= gt_mreg->slices[target].size, "Transfer is out of range");
+      if (ARMCII_GLOBAL_STATE.rma_atomicity)
+        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, grp_proc,
+                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);
+      else
+        MPI_Get(dst, size, MPI_BYTE, grp_proc, (MPI_Aint) disp, size, MPI_BYTE, gt_mreg->window);
+    }
     { /* inlined gmr_flush(src_mreg, target, local_only=0) -> full flush */
       ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
       ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
@@ -647,7 +334,24 @@ int PARMCI_Get(void *src, void *dst, int size, int target) {
 
     MPI_Alloc_mem(size, MPI_INFO_NULL, &dst_buf);
     ARMCII_Assert(dst_buf != NULL);
-    gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst_buf, size, MPI_BYTE, target, NULL);
+    { /* inlined gmr_get_typed(src_mreg, src, size, MPI_BYTE, dst_buf, size, MPI_BYTE, target, NULL) */
+      gmr_t *gt_mreg = src_mreg;
+      int grp_proc = target;
+      gmr_size_t disp;
+      MPI_Aint lb, extent;
+      ARMCII_Assert(grp_proc >= 0);
+      ARMCII_Assert_msg(gt_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+      if (src == MPI_BOTTOM) disp = 0;
+      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
+      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
+      ARMCII_Assert_msg(disp >= 0 && disp < gt_mreg->slices[target].size, "Invalid remote address");
+      ARMCII_Assert_msg(disp + size*extent <= gt_mreg->slices[target].size, "Transfer is out of range");
+      if (ARMCII_GLOBAL_STATE.rma_atomicity)
+        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst_buf, size, MPI_BYTE, grp_proc,
+                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);
+      else
+        MPI_Get(dst_buf, size, MPI_BYTE, grp_proc, (MPI_Aint) disp, size, MPI_BYTE, gt_mreg->window);
+    }
     { /* inlined gmr_flush(src_mreg, target, local_only=0) -> full flush */
       ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
       ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
@@ -1039,7 +743,55 @@ int PARMCI_Finalize(void) {
 
   nfreed = 0;   /* inlined gmr_destroy_all() */
   while (gmr_list != NULL) {
-    gmr_destroy(gmr_list, &gmr_list->group);
+    { /* inlined gmr_destroy(gmr_list, &gmr_list->group) */
+      gmr_t *mreg = gmr_list;
+      ARMCI_Group *group = &gmr_list->group;
+      int search_proc_in, search_proc_out, search_proc_out_grp;
+      void *search_base = NULL;
+      int alloc_me, alloc_nproc, world_me, world_nproc;
+      MPI_Comm_rank(group->comm, &alloc_me);
+      MPI_Comm_size(group->comm, &alloc_nproc);
+      MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
+      MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
+      if (mreg == NULL) search_proc_in = -1;
+      else { search_proc_in = world_me; search_base = mreg->slices[world_me].base; }
+      MPI_Allreduce(&search_proc_in, &search_proc_out, 1, MPI_INT, MPI_MAX, group->comm);
+      if (search_proc_out >= 0) {
+        search_proc_out_grp = search_proc_out;
+        MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
+        if (mreg == NULL) {
+          void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
+          gmr_t *m = gmr_list;
+          while (m != NULL) {
+            ARMCII_Assert(lk_proc < m->nslices);
+            if (lk_proc < m->nslices) {
+              const uint8_t   *base = m->slices[lk_proc].base;
+              const gmr_size_t sz   = m->slices[lk_proc].size;
+              if ((uint8_t*)lk_ptr >= base && (uint8_t*)lk_ptr < base + sz) break;
+            }
+            m = m->next;
+          }
+          mreg = m;
+        }
+        ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
+        if (mreg->prev == NULL) {
+          ARMCII_Assert(gmr_list == mreg);
+          gmr_list = mreg->next;
+          if (mreg->next != NULL) mreg->next->prev = NULL;
+        } else {
+          mreg->prev->next = mreg->next;
+          if (mreg->next != NULL) mreg->next->prev = mreg->prev;
+        }
+        ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+        MPI_Win_unlock_all(mreg->window);
+        MPI_Win_free(&mreg->window);
+        if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
+          if (mreg->slices[world_me].base != NULL) MPI_Free_mem(mreg->slices[world_me].base);
+        }
+        free(mreg->slices);
+        free(mreg);
+      }
+    }
     nfreed++;
   }
 
@@ -1216,7 +968,118 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
      assert(ndim<=MAXDIMS);
      for(i=0;i<ndim;i++)bytes*=dims[i];
      /* inlined PARMCI_Malloc -> ARMCI_Malloc_group -> gmr_create */
-     gmr_create(bytes, a, &ARMCI_GROUP_WORLD);
+     { /* inlined gmr_create(bytes, a, &ARMCI_GROUP_WORLD) */
+       gmr_size_t local_size = bytes;
+       void **base_ptrs = a;
+       ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+       int           gi, alloc_me, alloc_nproc, world_me, world_nproc;
+       MPI_Group     world_group, alloc_group;
+       gmr_t        *mreg;
+       gmr_slice_t  *alloc_slices, gmr_slice;
+
+       ARMCII_Assert(local_size >= 0);
+       ARMCII_Assert(group != NULL);
+
+       MPI_Comm_rank(group->comm, &alloc_me);
+       MPI_Comm_size(group->comm, &alloc_nproc);
+
+       gmr_size_t max_local_size;
+       MPI_Allreduce(&local_size, &max_local_size, 1, GMR_MPI_SIZE_T, MPI_MAX, group->comm);
+
+       if (max_local_size == 0) {
+         for (gi = 0; gi < alloc_nproc; gi++) base_ptrs[gi] = NULL;
+       } else {
+         MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
+         MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
+
+         mreg = malloc(sizeof(gmr_t));
+         ARMCII_Assert(mreg != NULL);
+         mreg->slices = malloc(sizeof(gmr_slice_t)*world_nproc);
+         ARMCII_Assert(mreg->slices != NULL);
+         alloc_slices = malloc(sizeof(gmr_slice_t)*alloc_nproc);
+         ARMCII_Assert(alloc_slices != NULL);
+
+         mreg->group   = *group;
+         mreg->nslices = world_nproc;
+         mreg->prev    = NULL;
+         mreg->next    = NULL;
+         mreg->unified = false;
+
+         alloc_slices[alloc_me].size = local_size;
+
+         MPI_Info win_info = MPI_INFO_NULL;
+         MPI_Info_create(&win_info);
+         if (ARMCII_GLOBAL_STATE.use_alloc_shm) MPI_Info_set(win_info, "alloc_shm", "true");
+         else                                   MPI_Info_set(win_info, "alloc_shm", "false");
+
+         if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
+           if (local_size == 0) alloc_slices[alloc_me].base = NULL;
+           else { MPI_Alloc_mem(local_size, win_info, &(alloc_slices[alloc_me].base));
+                  ARMCII_Assert(alloc_slices[alloc_me].base != NULL); }
+           MPI_Win_create(alloc_slices[alloc_me].base, (MPI_Aint) local_size, 1, MPI_INFO_NULL, group->comm, &mreg->window);
+         } else if (ARMCII_GLOBAL_STATE.use_win_allocate == 1) {
+           MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &mreg->window);
+           if (local_size == 0) alloc_slices[alloc_me].base = NULL;
+           else ARMCII_Assert(alloc_slices[alloc_me].base != NULL);
+         } else {
+           ARMCII_Error("invalid window type!\n");
+         }
+
+         MPI_Info_free(&win_info);
+
+         if (ARMCII_GLOBAL_STATE.debug_alloc && local_size > 0)
+           memset(alloc_slices[alloc_me].base, 0, (size_t)(local_size));
+
+         gmr_slice = alloc_slices[alloc_me];
+         MPI_Allgather(&gmr_slice, sizeof(gmr_slice_t), MPI_BYTE,
+                       alloc_slices, sizeof(gmr_slice_t), MPI_BYTE, group->comm);
+
+         for (gi = 0; gi < alloc_nproc; gi++) base_ptrs[gi] = alloc_slices[gi].base;
+
+         memset(mreg->slices, 0, sizeof(gmr_slice_t)*world_nproc);
+
+         MPI_Comm_group(ARMCI_GROUP_WORLD.comm, &world_group);
+         MPI_Comm_group(group->comm, &alloc_group);
+         for (gi = 0; gi < alloc_nproc; gi++) {
+           int world_rank;
+           MPI_Group_translate_ranks(alloc_group, 1, &gi, world_group, &world_rank);
+           mreg->slices[world_rank] = alloc_slices[gi];
+         }
+         free(alloc_slices);
+         MPI_Group_free(&world_group);
+         MPI_Group_free(&alloc_group);
+
+         MPI_Win_lock_all((ARMCII_GLOBAL_STATE.rma_nocheck) ? MPI_MODE_NOCHECK : 0, mreg->window);
+
+         {
+           int unified;
+           { void *attr_ptr; int attr_flag;
+             MPI_Win_get_attr(mreg->window, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
+             if (attr_flag) { int *attr_val = (int*)attr_ptr;
+               if      ((*attr_val)==MPI_WIN_UNIFIED) unified = 1;
+               else if ((*attr_val)==MPI_WIN_UNIFIED) unified = 0;
+               else                                   unified = -1;
+             } else unified = -1;
+           }
+           const int print = ARMCII_GLOBAL_STATE.verbose;
+           if (unified == 1) { mreg->unified = true;  if (print > 1) printf("MPI_WIN_MODEL = MPI_WIN_UNIFIED\n"); }
+           else if (unified == 0) { mreg->unified = false; if (print > 1) printf("MPI_WIN_MODEL = MPI_WIN_SEPARATE\n"); }
+           else { mreg->unified = false; if (print > 1) printf("MPI_WIN_MODEL not available\n"); }
+           if (!(mreg->unified) && (ARMCII_GLOBAL_STATE.shr_buf_method == ARMCII_SHR_BUF_NOGUARD)) {
+             if (world_me==0) printf("Please re-run with ARMCI_SHR_BUF_METHOD=COPY\n");
+           }
+         }
+
+         if (gmr_list == NULL) {
+           gmr_list = mreg;
+         } else {
+           gmr_t *parent = gmr_list;
+           while (parent->next != NULL) parent = parent->next;
+           parent->next = mreg;
+           mreg->prev   = parent;
+         }
+       }
+     }
      rc = 0;
      assert(rc==0);
      assert(a[me]);
@@ -1248,7 +1111,54 @@ void destroy_array(void *ptr[])
       } else {
         mreg = NULL;
       }
-      gmr_destroy(mreg, &ARMCI_GROUP_WORLD);
+      { /* inlined gmr_destroy(mreg, &ARMCI_GROUP_WORLD) */
+        ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+        int search_proc_in, search_proc_out, search_proc_out_grp;
+        void *search_base = NULL;
+        int alloc_me, alloc_nproc, world_me, world_nproc;
+        MPI_Comm_rank(group->comm, &alloc_me);
+        MPI_Comm_size(group->comm, &alloc_nproc);
+        MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
+        MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
+        if (mreg == NULL) search_proc_in = -1;
+        else { search_proc_in = world_me; search_base = mreg->slices[world_me].base; }
+        MPI_Allreduce(&search_proc_in, &search_proc_out, 1, MPI_INT, MPI_MAX, group->comm);
+        if (search_proc_out >= 0) {
+          search_proc_out_grp = search_proc_out;
+          MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
+          if (mreg == NULL) {
+            void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
+            gmr_t *m = gmr_list;
+            while (m != NULL) {
+              ARMCII_Assert(lk_proc < m->nslices);
+              if (lk_proc < m->nslices) {
+                const uint8_t   *base = m->slices[lk_proc].base;
+                const gmr_size_t sz   = m->slices[lk_proc].size;
+                if ((uint8_t*)lk_ptr >= base && (uint8_t*)lk_ptr < base + sz) break;
+              }
+              m = m->next;
+            }
+            mreg = m;
+          }
+          ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
+          if (mreg->prev == NULL) {
+            ARMCII_Assert(gmr_list == mreg);
+            gmr_list = mreg->next;
+            if (mreg->next != NULL) mreg->next->prev = NULL;
+          } else {
+            mreg->prev->next = mreg->next;
+            if (mreg->next != NULL) mreg->next->prev = mreg->prev;
+          }
+          ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+          MPI_Win_unlock_all(mreg->window);
+          MPI_Win_free(&mreg->window);
+          if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
+            if (mreg->slices[world_me].base != NULL) MPI_Free_mem(mreg->slices[world_me].base);
+          }
+          free(mreg->slices);
+          free(mreg);
+        }
+      }
       rc = 0;
     }
     assert(rc==0);
