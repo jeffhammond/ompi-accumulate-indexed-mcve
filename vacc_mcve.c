@@ -19,16 +19,9 @@ int main(int argc, char **argv)
     double *b;
     MPI_Win window = MPI_WIN_NULL;
 
-    {
-        MPI_Info win_info = MPI_INFO_NULL;
-        MPI_Info_create(&win_info);
-        MPI_Info_set(win_info, "alloc_shm", "false");
-        MPI_Win_allocate((MPI_Aint)bytes, 1, win_info, MPI_COMM_WORLD,
-                         &b, &window);
-        MPI_Info_free(&win_info);
-
-        MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
-    }
+    MPI_Win_allocate((MPI_Aint)bytes, 1, MPI_INFO_NULL, MPI_COMM_WORLD,
+                     &b, &window);
+    MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
     double * const a = malloc(bytes);
     double * const c = malloc(bytes);
 
@@ -56,6 +49,8 @@ int main(int argc, char **argv)
             }
 
             for (int start = 0; start < 250; start++) {
+#ifndef USE_MPI_DOUBLE
+                /* The single-double indexed datatypes trigger the Open MPI bug. */
                 const int disp_loc = start;
                 const int disp_rem = 2*start+parity;
                 MPI_Datatype type_loc, type_rem;
@@ -71,6 +66,12 @@ int main(int argc, char **argv)
 
                 MPI_Type_free(&type_loc);
                 MPI_Type_free(&type_rem);
+#else
+                const MPI_Aint target_disp =
+                    (MPI_Aint)(2*start+parity)*sizeof(double);
+                MPI_Accumulate(&contig[start], 1, MPI_DOUBLE, 0,
+                               target_disp, 1, MPI_DOUBLE, MPI_SUM, window);
+#endif
             }
             MPI_Win_flush_local(0, window);
             MPI_Free_mem(contig);
