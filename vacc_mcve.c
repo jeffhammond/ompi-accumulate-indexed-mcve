@@ -57,7 +57,6 @@ typedef struct {
 } gmr_slice_t;
 
 typedef struct gmr_s {
-  MPI_Win                 window;
   ARMCI_Group             group;
 
   struct gmr_s           *prev;
@@ -112,6 +111,7 @@ ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
 
 gmr_t *gmr_list = NULL;
+MPI_Win window = MPI_WIN_NULL;   /* single global window */
 
 /* DO NOT INLINE ANYTHING BELOW HERE */
 
@@ -298,7 +298,7 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
          MPI_Info_set(win_info, "alloc_shm", "true");   /* use_alloc_shm */
 
          /* use_win_allocate == 1 */
-         MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &mreg->window);
+         MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &window);
          if (local_size == 0) alloc_slices[alloc_me].base = NULL;
 
          MPI_Info_free(&win_info);
@@ -322,12 +322,12 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
          MPI_Group_free(&world_group);
          MPI_Group_free(&alloc_group);
 
-         MPI_Win_lock_all(MPI_MODE_NOCHECK, mreg->window);   /* rma_nocheck */
+         MPI_Win_lock_all(MPI_MODE_NOCHECK, window);   /* rma_nocheck */
 
          {
            int unified;
            { void *attr_ptr; int attr_flag;
-             MPI_Win_get_attr(mreg->window, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
+             MPI_Win_get_attr(window, MPI_WIN_MODEL, &attr_ptr, &attr_flag);
              if (attr_flag) { int *attr_val = (int*)attr_ptr;
                if      ((*attr_val)==MPI_WIN_UNIFIED) unified = 1;
                else if ((*attr_val)==MPI_WIN_UNIFIED) unified = 0;
@@ -412,8 +412,8 @@ void destroy_array(void *ptr[])
             mreg->prev->next = mreg->next;
             if (mreg->next != NULL) mreg->next->prev = mreg->prev;
           }
-          MPI_Win_unlock_all(mreg->window);
-          MPI_Win_free(&mreg->window);
+          MPI_Win_unlock_all(window);
+          MPI_Win_free(&window);
           free(mreg->slices);
           free(mreg);
         }
@@ -601,14 +601,14 @@ void test_vector_acc()
             
                     /* origin = base_loc_ptr + type_loc; target = window base (disp 0) + type_rem,
                      * whose element offsets are relative to the window base. */
-                    MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, mreg->window);
+                    MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
             
                     MPI_Type_free(&type_loc);
                     MPI_Type_free(&type_rem);
                   }
             
                   /* blocking=1, flush_local=1 (ACC): inlined gmr_flush(mreg, proc, 1) */
-                  MPI_Win_flush_local(proc, mreg->window);   /* end_to_end_flush=0 */
+                  MPI_Win_flush_local(proc, window);   /* end_to_end_flush=0 */
                 }
             
                 { /* inlined ARMCII_Buf_finish_acc_vec(iov[v].src_ptr_array, src_buf, ...) */
@@ -751,14 +751,14 @@ void test_vector_acc()
             
                     /* origin = base_loc_ptr + type_loc; target = window base (disp 0) + type_rem,
                      * whose element offsets are relative to the window base. */
-                    MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, mreg->window);
+                    MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
             
                     MPI_Type_free(&type_loc);
                     MPI_Type_free(&type_rem);
                   }
             
                   /* blocking=1, flush_local=1 (ACC): inlined gmr_flush(mreg, proc, 1) */
-                  MPI_Win_flush_local(proc, mreg->window);   /* end_to_end_flush=0 */
+                  MPI_Win_flush_local(proc, window);   /* end_to_end_flush=0 */
                 }
             
                 { /* inlined ARMCII_Buf_finish_acc_vec(iov[v].src_ptr_array, src_buf, ...) */
@@ -785,13 +785,7 @@ void test_vector_acc()
 
         }
 
-        { /* inlined PARMCI_AllFence() */
-          gmr_t *cur_mreg = gmr_list;
-          while (cur_mreg) {
-            MPI_Win_flush_all(cur_mreg->window);
-            cur_mreg = cur_mreg->next;
-          }
-        }
+        MPI_Win_flush_all(window);   /* inlined PARMCI_AllFence(): single global window */
         MPI_Barrier(MPI_COMM_WORLD);
 
 	{ /* inlined PARMCI_Get((double*)b[proc], c, bytes, proc) (always returns 0) */
@@ -799,7 +793,7 @@ void test_vector_acc()
 	  void *dst = c;
 	  int size = bytes;
 	  int target = proc;
-	  gmr_t *src_mreg, *dst_mreg;
+	  gmr_t *src_mreg;
 
 	  { /* inlined gmr_lookup(src, target) */
 	    void *lk_ptr = (src); int lk_proc = (target);
@@ -815,13 +809,11 @@ void test_vector_acc()
 	    src_mreg = m;
 	  }
 
-	  dst_mreg = NULL;   /* shr_buf=NOGUARD */
-
-
-	  if (target == ARMCI_GROUP_WORLD.rank && dst_mreg == NULL) {
+	  /* dst_mreg == NULL always (shr_buf=NOGUARD) */
+	  if (target == ARMCI_GROUP_WORLD.rank) {
 	    memmove(dst, src, size);
 	  }
-	  else if (dst_mreg == NULL) {
+	  else {
 	    { /* inlined gmr_get_typed(...) */
 	      gmr_t *gt_mreg = src_mreg;
 	      int grp_proc = target;
@@ -831,31 +823,11 @@ void test_vector_acc()
 	      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
 	      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
 	      MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, grp_proc,
-	                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);   /* rma_atomicity */
+	                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, window);   /* rma_atomicity */
 	    }
 	    { /* inlined gmr_flush(src_mreg, target, 0) -> full flush */
-	      MPI_Win_flush(target, src_mreg->window);
+	      MPI_Win_flush(target, window);
 	    }
-	  }
-	  else {
-	    void *dst_buf;
-	    MPI_Alloc_mem(size, MPI_INFO_NULL, &dst_buf);
-	    { /* inlined gmr_get_typed(...) */
-	      gmr_t *gt_mreg = src_mreg;
-	      int grp_proc = target;
-	      gmr_size_t disp;
-	      MPI_Aint lb, extent;
-	      if (src == MPI_BOTTOM) disp = 0;
-	      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
-	      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
-	      MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst_buf, size, MPI_BYTE, grp_proc,
-	                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);   /* rma_atomicity */
-	    }
-	    { /* inlined gmr_flush(src_mreg, target, 0) -> full flush */
-	      MPI_Win_flush(target, src_mreg->window);
-	    }
-	    memmove(dst, dst_buf, size);
-	    MPI_Free_mem(dst_buf);
 	  }
 	}
 
@@ -951,8 +923,8 @@ int main(int argc, char **argv)
               mreg->prev->next = mreg->next;
               if (mreg->next != NULL) mreg->next->prev = mreg->prev;
             }
-            MPI_Win_unlock_all(mreg->window);
-            MPI_Win_free(&mreg->window);
+            MPI_Win_unlock_all(window);
+            MPI_Win_free(&window);
             free(mreg->slices);
             free(mreg);
           }
