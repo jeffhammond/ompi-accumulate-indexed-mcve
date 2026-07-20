@@ -7,14 +7,17 @@
 #define MAX(A,B) (((A) > (B)) ? A : B)
 #define ABS(a) (((a) <0) ? -(a) : (a))
 
-MPI_Win window = MPI_WIN_NULL;
-
-int world_me, world_np;
-
-static void test_vector_acc(void)
+int main(int argc, char **argv)
 {
+    MPI_Init(&argc, &argv);
+    int world_me, world_np;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_me);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_np);
+    if (world_me == 0) printf("standalone test_vector_acc: %d procs\n", world_np);
+
     const int bytes = (int)sizeof(double)*500;
     double *b;
+    MPI_Win window = MPI_WIN_NULL;
 
     {
         MPI_Info win_info = MPI_INFO_NULL;
@@ -115,15 +118,6 @@ static void test_vector_acc(void)
     MPI_Win_unlock_all(window);
     MPI_Win_free(&window);
     free(a);
-}
-
-int main(int argc, char **argv)
-{
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &world_me);
-    MPI_Comm_size(MPI_COMM_WORLD, &world_np);
-    if (world_me == 0) printf("standalone test_vector_acc: %d procs\n", world_np);
-    test_vector_acc();
     MPI_Barrier(MPI_COMM_WORLD);
     if (world_me == 0) printf("DONE OK\n");
     MPI_Finalize();
