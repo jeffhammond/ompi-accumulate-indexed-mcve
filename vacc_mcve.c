@@ -23,9 +23,7 @@ typedef struct gmr_s {
 gmr_t *mreg = NULL;
 MPI_Win window = MPI_WIN_NULL;
 
-#define ELEMS 500
 #define MAXPROC 128
-#define TIMES 100
 int world_me, world_np;
 
 static void compare_patches(double eps, const double *patch1,
@@ -112,8 +110,7 @@ static void GetPermutedProcList(int *ProcList)
 
 static void test_vector_acc(void)
 {
-    const int elems = ELEMS;
-    const int bytes = (int)sizeof(double)*elems;
+    const int bytes = (int)sizeof(double)*500;
     double *b[MAXPROC];
 
     {
@@ -142,12 +139,12 @@ static void test_vector_acc(void)
     double * const a = malloc(bytes);
     void * const c = malloc(bytes);
 
-    for (int i = 0; i < elems; i++) {
-        a[i] = i % elems;
+    for (int i = 0; i < 500; i++) {
+        a[i] = i % 500;
     }
 
     if(world_me==0){
-        printf("--------array[%d",elems);
+        printf("--------array[%d",500);
         printf("]--------\n");
         fflush(stdout);
     }
@@ -155,34 +152,30 @@ static void test_vector_acc(void)
     int proclist[MAXPROC];
     GetPermutedProcList(proclist);
 
-    for (int i=0;i<elems;i++) b[world_me][i]=0.;
+    for (int i=0;i<500;i++) b[world_me][i]=0.;
 
     sleep(1);
 
     const int proc = 0;
     const double alpha = 0.1;
     armci_giov_t dsc = {
-        .src_ptr_array = (void *[ELEMS/2]){0},
-        .dst_ptr_array = (void *[ELEMS/2]){0},
+        .src_ptr_array = (void *[250]){0},
+        .dst_ptr_array = (void *[250]){0},
         .bytes = sizeof(double),
-        .ptr_array_len = ELEMS/2
+        .ptr_array_len = 250
     };
     MPI_Barrier(MPI_COMM_WORLD);
-    for (int i=0;i<TIMES*world_np;i++){
-        for (int j=0; j<elems/2; j++){
+    for (int i=0;i<100*world_np;i++){
+        for (int j=0; j<250; j++){
             dsc.src_ptr_array[j]= 2*j + a;
             dsc.dst_ptr_array[j]= 2*j + b[proc];
         }
         {
             armci_giov_t * const iov = &dsc;
-            const int iov_len = 1;
-            for (int v = 0; v < iov_len; v++) {
-                if (iov[v].ptr_array_len == 0) continue;
-                if (iov[v].bytes == 0) continue;
-
-                void ** const orig_bufs = iov[v].src_ptr_array;
-                const int count = iov[v].ptr_array_len;
-                const int size = iov[v].bytes;
+            {
+                void ** const orig_bufs = iov[0].src_ptr_array;
+                const int count = iov[0].ptr_array_len;
+                const int size = iov[0].bytes;
                 void ** const src_buf = malloc((count+1)*sizeof(void*));
                 char *contig;
                 MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
@@ -200,9 +193,9 @@ static void test_vector_acc(void)
                 }
 
                 {
-                    const int elem_count = iov[v].bytes/(int)sizeof(double);
+                    const int elem_count = iov[0].bytes/(int)sizeof(double);
 
-                    void ** const buf_rem = iov[v].dst_ptr_array;
+                    void ** const buf_rem = iov[0].dst_ptr_array;
                     void ** const buf_loc = src_buf;
 
                     MPI_Datatype  type_loc, type_rem;
@@ -247,20 +240,16 @@ static void test_vector_acc(void)
                 free(src_buf);
             }
         }
-        for (int j=0; j< elems/2; j++){
+        for (int j=0; j<250; j++){
             dsc.src_ptr_array[j]= 2*j+1 + a;
             dsc.dst_ptr_array[j]= 2*j+1 + b[proc];
         }
         {
             armci_giov_t * const iov = &dsc;
-            const int iov_len = 1;
-            for (int v = 0; v < iov_len; v++) {
-                if (iov[v].ptr_array_len == 0) continue;
-                if (iov[v].bytes == 0) continue;
-
-                void ** const orig_bufs = iov[v].src_ptr_array;
-                const int count = iov[v].ptr_array_len;
-                const int size = iov[v].bytes;
+            {
+                void ** const orig_bufs = iov[0].src_ptr_array;
+                const int count = iov[0].ptr_array_len;
+                const int size = iov[0].bytes;
                 void ** const src_buf = malloc((count+1)*sizeof(void*));
                 char *contig;
                 MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
@@ -278,9 +267,9 @@ static void test_vector_acc(void)
                 }
 
                 {
-                    const int elem_count = iov[v].bytes/(int)sizeof(double);
+                    const int elem_count = iov[0].bytes/(int)sizeof(double);
 
-                    void ** const buf_rem = iov[v].dst_ptr_array;
+                    void ** const buf_rem = iov[0].dst_ptr_array;
                     void ** const buf_loc = src_buf;
 
                     MPI_Datatype  type_loc, type_rem;
@@ -342,10 +331,11 @@ static void test_vector_acc(void)
     }
 
     const int one = 1;
-    const double scale = alpha*TIMES*world_np*world_np;
-    scale_patch(scale, a, &one, &elems);
+    const double scale = alpha*100*world_np*world_np;
+    scale_patch(scale, a, &one, &(const int){500});
 
-    compare_patches(.0001, a, &one, &elems, c, &one, &elems);
+    compare_patches(.0001, a, &one, &(const int){500},
+                    c, &one, &(const int){500});
     MPI_Barrier(MPI_COMM_WORLD);
 
     if(0==world_me){
