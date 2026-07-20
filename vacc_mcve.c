@@ -33,7 +33,6 @@ MPI_Win window = MPI_WIN_NULL;
 #define MAXPROC 128
 #define TIMES 100
 int world_me, world_np;
-void* work[MAXPROC];
 
 static void compare_patches(double eps, double *patch1, int lo1[], int hi1[],
                             double *patch2, int lo2[], int hi2[])
@@ -78,7 +77,6 @@ static void compare_patches(double eps, double *patch1, int lo1[], int hi1[],
         if (subscr2 < hi2[0]) subscr2++;
         else subscr2 = lo2[0];
     }
-
 }
 
 static void scale_patch(double alpha, double *patch1, int lo1[], int hi1[])
@@ -103,22 +101,14 @@ static void scale_patch(double alpha, double *patch1, int lo1[], int hi1[])
 
 static void GetPermutedProcList(int *ProcList)
 {
-    int iswap, temp;
-
-    if(world_np > MAXPROC) {
-        fprintf(stderr, "[%d] ARMCI Error: permute_proc: nproc to big \n", world_me);
-        fflush(NULL);
-        MPI_Abort(MPI_COMM_WORLD, world_np);
-    }
-
     for (int i=0; i< world_np; i++) ProcList[i]=i;
     if(world_np ==1) return;
 
     (void)srand((unsigned)world_me);
 
     for (int i=0; i< world_np; i++){
-        iswap = (int)(rand() % world_np);
-        temp = ProcList[iswap];
+        int iswap = (int)(rand() % world_np);
+        int temp = ProcList[iswap];
         ProcList[iswap] = ProcList[i];
         ProcList[i] = temp;
     }
@@ -132,7 +122,7 @@ static void test_vector_acc(void)
     double *a;
     void *c;
     double alpha=0.1, scale;
-    int *proclist = (int*)work;
+    int proclist[MAXPROC];
     armci_giov_t dsc = {
         .src_ptr_array = (void *[ELEMS/2]){0},
         .dst_ptr_array = (void *[ELEMS/2]){0},
@@ -153,15 +143,13 @@ static void test_vector_acc(void)
         MPI_Info win_info = MPI_INFO_NULL;
         MPI_Info_create(&win_info);
         MPI_Info_set(win_info, "alloc_shm", "true");
-
-        MPI_Win_allocate((MPI_Aint)bytes, 1, win_info, MPI_COMM_WORLD,
-                         &alloc_slices[world_me], &window);
+        MPI_Win_allocate((MPI_Aint)bytes, 1, win_info, MPI_COMM_WORLD, &alloc_slices[world_me], &window);
         MPI_Info_free(&win_info);
+        MPI_Allgather(&alloc_slices[world_me], sizeof(void *), MPI_BYTE, alloc_slices, sizeof(void *), MPI_BYTE, MPI_COMM_WORLD);
 
-        MPI_Allgather(&alloc_slices[world_me], sizeof(void *), MPI_BYTE,
-                      alloc_slices, sizeof(void *), MPI_BYTE, MPI_COMM_WORLD);
-
-        for (int gi = 0; gi < world_np; gi++) b[gi] = alloc_slices[gi];
+        for (int gi = 0; gi < world_np; gi++) {
+            b[gi] = alloc_slices[gi];
+        }
 
         for (int gi = 0; gi < world_np; gi++) {
             mreg->slices[gi] = alloc_slices[gi];
@@ -274,24 +262,17 @@ static void test_vector_acc(void)
                         disp_loc[i]  = (int)((loc_addr[i] - base_loc)/(MPI_Aint)sizeof(double));
                     }
 
-                    int chunk = 1;
-
-                    for (int start = 0; start < count; start += chunk) {
-                        int n = (count - start < chunk) ? (count - start) : chunk;
-
-                        MPI_Type_create_indexed_block(n, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
-                        MPI_Type_create_indexed_block(n, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
+                    for (int start = 0; start < count; start++) {
+                        MPI_Type_create_indexed_block(1, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
+                        MPI_Type_create_indexed_block(1, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
                         MPI_Type_commit(&type_loc);
                         MPI_Type_commit(&type_rem);
-
 
                         MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
 
                         MPI_Type_free(&type_loc);
                         MPI_Type_free(&type_rem);
                     }
-
-
                     MPI_Win_flush_local(proc, window);
                 }
 
@@ -309,11 +290,9 @@ static void test_vector_acc(void)
                             }
                         }
                     }
-
                     free(new_bufs);
                 }
             }
-
         }
         for (int j=0; j< elems/2; j++){
             dsc.src_ptr_array[j]= 2*j+1 + a;
@@ -359,7 +338,6 @@ static void test_vector_acc(void)
                             new_bufs[i] = orig_bufs[i];
                         }
                     }
-
                     src_buf = new_bufs;
                 }
 
@@ -395,24 +373,17 @@ static void test_vector_acc(void)
                         disp_loc[i]  = (int)((loc_addr[i] - base_loc)/(MPI_Aint)sizeof(double));
                     }
 
-                    int chunk = 1;
-
-                    for (int start = 0; start < count; start += chunk) {
-                        int n = (count - start < chunk) ? (count - start) : chunk;
-
-                        MPI_Type_create_indexed_block(n, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
-                        MPI_Type_create_indexed_block(n, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
+                    for (int start = 0; start < count; start++) {
+                        MPI_Type_create_indexed_block(1, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
+                        MPI_Type_create_indexed_block(1, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
                         MPI_Type_commit(&type_loc);
                         MPI_Type_commit(&type_rem);
-
 
                         MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
 
                         MPI_Type_free(&type_loc);
                         MPI_Type_free(&type_rem);
                     }
-
-
                     MPI_Win_flush_local(proc, window);
                 }
 
@@ -430,13 +401,10 @@ static void test_vector_acc(void)
                             }
                         }
                     }
-
                     free(new_bufs);
                 }
             }
-
         }
-
     }
 
     MPI_Win_flush_all(window);
@@ -448,21 +416,11 @@ static void test_vector_acc(void)
         int size = bytes;
         int target = proc;
 
-        if (target == world_me) {
-            memmove(dst, src, size);
-        }
-        else {
-            {
-                gmr_size_t disp;
-                if (src == MPI_BOTTOM) disp = 0;
-                else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)mreg->slices[target]);
-                MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, target,
-                                   (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, window);
-            }
-            {
-                MPI_Win_flush(target, window);
-            }
-        }
+        gmr_size_t disp;
+        if (src == MPI_BOTTOM) disp = 0;
+        else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)mreg->slices[target]);
+        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, target, (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, window);
+        MPI_Win_flush(target, window);
     }
 
     scale = alpha*TIMES*world_np*world_np;
@@ -482,7 +440,6 @@ static void test_vector_acc(void)
     MPI_Win_free(&window);
     free(mreg->slices);
     free(mreg);
-    mreg = NULL;
     free(a);
 }
 
@@ -492,6 +449,10 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &world_me);
     MPI_Comm_size(MPI_COMM_WORLD, &world_np);
     if (world_me == 0) printf("standalone test_vector_acc: %d procs\n", world_np);
+    if(world_np > MAXPROC) {
+        fprintf(stderr, "nproc to big (max=%d)\n", MAXPROC);
+        MPI_Abort(MPI_COMM_WORLD, world_np);
+    }
     test_vector_acc();
     MPI_Barrier(MPI_COMM_WORLD);
     if (world_me == 0) printf("DONE OK\n");
