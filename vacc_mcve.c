@@ -82,11 +82,6 @@ typedef struct {
 extern ARMCI_Group ARMCI_GROUP_WORLD;
 extern ARMCI_Group ARMCI_GROUP_DEFAULT;
 
-char *ARMCII_Getenv(const char *varname);
-int   ARMCII_Getenv_bool(const char *varname, int default_value);
-int   ARMCII_Getenv_int(const char *varname, int default_value);
-long  ARMCII_Getenv_long(const char *varname, long default_value);
-void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length);
 
 
 
@@ -156,53 +151,6 @@ void ARMCI_Error(const char *msg, int code) {
   fprintf(stderr, "[%d] ARMCI Error: %s\n", ARMCI_GROUP_WORLD.rank, msg);
   fflush(NULL);
   MPI_Abort(ARMCI_GROUP_WORLD.comm, code);
-}
-
-int ARMCII_Getenv_bool(const char *varname, int default_value) {
-  const char *var = getenv(varname);
-
-  if (var == NULL) {
-    return default_value;
-  }
-  if (var[0] == 'T' || var[0] == 't' || var[0] == '1' || var[0] == 'y' || var[0] == 'Y') {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-char *ARMCII_Getenv(const char *varname) {
-  return getenv(varname);
-}
-
-int ARMCII_Getenv_int(const char *varname, int default_value) {
-  const char *var = getenv(varname);
-  if (var) {
-    return atoi(var);
-  } else {
-    return default_value;
-  }
-}
-
-long ARMCII_Getenv_long(const char *varname, long default_value) {
-  const char *var = getenv(varname);
-  if (var) {
-    return atol(var);
-  } else {
-    return default_value;
-  }
-}
-
-void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length) {
-  const char *var = getenv(varname);
-  if (var) {
-    if (strlen(var) > length) {
-      ARMCII_Warning("ARMCI_Getenv_char: %s = %s is too long (%d)\n", varname, var, length);
-    }
-    strncpy(output, var, length);
-  } else {
-    strncpy(output, default_value, length);
-  }
 }
 
 ARMCI_Group ARMCI_GROUP_WORLD   = {0};
@@ -1100,7 +1048,7 @@ int main(int argc, char **argv)
       }
       ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
     
-      ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
+      ARMCII_GLOBAL_STATE.verbose = 0;
     
       char mpi_library_version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
       {
@@ -1108,26 +1056,26 @@ int main(int argc, char **argv)
         MPI_Get_library_version(mpi_library_version, &len);
       }
     
-      ARMCII_GLOBAL_STATE.debug_alloc = ARMCII_Getenv_bool("ARMCI_DEBUG_ALLOC", 0);
+      ARMCII_GLOBAL_STATE.debug_alloc = 0;
     
       ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
       ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
     
-      ARMCII_GLOBAL_STATE.iov_checks        = ARMCII_Getenv_bool("ARMCI_IOV_CHECKS", 0);
-      ARMCII_GLOBAL_STATE.iov_batched_limit = ARMCII_Getenv_int("ARMCI_IOV_BATCHED_LIMIT", 0);
+      ARMCII_GLOBAL_STATE.iov_checks        = 0;
+      ARMCII_GLOBAL_STATE.iov_batched_limit = 0;
     
       if (ARMCII_GLOBAL_STATE.iov_batched_limit < 0) {
         ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_BATCHED_LIMIT (%d)\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
         ARMCII_GLOBAL_STATE.iov_batched_limit = 0;
       }
     
-      ARMCII_GLOBAL_STATE.iov_dtype_chunk = ARMCII_Getenv_int("ARMCI_IOV_DTYPE_CHUNK", 1);
+      ARMCII_GLOBAL_STATE.iov_dtype_chunk = 1;
       if (ARMCII_GLOBAL_STATE.iov_dtype_chunk < 0) {
         ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_DTYPE_CHUNK (%d)\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
         ARMCII_GLOBAL_STATE.iov_dtype_chunk = 0;
       }
     
-      char *var = ARMCII_Getenv("ARMCI_IOV_METHOD");
+      char *var = NULL;
       if (var != NULL) {
         if (strcmp(var, "AUTO") == 0)
           ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_AUTO;
@@ -1141,7 +1089,7 @@ int main(int argc, char **argv)
           ARMCII_Warning("Ignoring unknown value for ARMCI_IOV_METHOD (%s)\n", var);
       }
     
-      var = ARMCII_Getenv("ARMCI_STRIDED_METHOD");
+      var = NULL;
       if (var != NULL) {
         if (strcmp(var, "IOV") == 0) {
           ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_IOV;
@@ -1154,7 +1102,7 @@ int main(int argc, char **argv)
     
       ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
     
-      var = ARMCII_Getenv("ARMCI_SHR_BUF_METHOD");
+      var = NULL;
       if (var != NULL) {
         if (strcmp(var, "COPY") == 0) {
           ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_COPY;
@@ -1165,15 +1113,15 @@ int main(int argc, char **argv)
         }
       }
     
-      ARMCII_GLOBAL_STATE.use_win_allocate = ARMCII_Getenv_bool("ARMCI_USE_WIN_ALLOCATE", 1);
-      ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
-      ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
-      ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
-      ARMCII_GLOBAL_STATE.rma_atomicity=ARMCII_Getenv_bool("ARMCI_RMA_ATOMICITY", 1);
-      ARMCII_GLOBAL_STATE.end_to_end_flush=ARMCII_Getenv_bool("ARMCI_NO_FLUSH_LOCAL", 0);
-      ARMCII_GLOBAL_STATE.rma_nocheck=ARMCII_Getenv_bool("ARMCI_RMA_NOCHECK", 1);
-      ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", 1);
-      ARMCII_GLOBAL_STATE.flush_request_atomics=ARMCII_Getenv_bool("ARMCI_FLUSH_REQUEST_ATOMICS", 0);
+      ARMCII_GLOBAL_STATE.use_win_allocate = 1;
+      ARMCII_GLOBAL_STATE.msg_barrier_syncs = 0;
+      ARMCII_GLOBAL_STATE.explicit_nb_progress=1;
+      ARMCII_GLOBAL_STATE.use_alloc_shm=1;
+      ARMCII_GLOBAL_STATE.rma_atomicity=1;
+      ARMCII_GLOBAL_STATE.end_to_end_flush=0;
+      ARMCII_GLOBAL_STATE.rma_nocheck=1;
+      ARMCII_GLOBAL_STATE.use_request_atomics=1;
+      ARMCII_GLOBAL_STATE.flush_request_atomics=0;
     
       ARMCII_GLOBAL_STATE.init_count++;
     
