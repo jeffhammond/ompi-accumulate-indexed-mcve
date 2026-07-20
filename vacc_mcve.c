@@ -49,8 +49,6 @@ typedef struct {
   int       size;
 } ARMCI_Group;
 
-int     PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm);
-int     PARMCI_Finalize(void);
 
 enum ARMCII_Op_e { ARMCII_OP_PUT, ARMCII_OP_GET, ARMCII_OP_ACC };
 enum ARMCII_Strided_methods_e { ARMCII_STRIDED_IOV, ARMCII_STRIDED_DIRECT };
@@ -256,273 +254,6 @@ ARMCI_Group ARMCI_GROUP_WORLD   = {0};
 ARMCI_Group ARMCI_GROUP_DEFAULT = {0};
 
 gmr_t *gmr_list = NULL;
-
-int PARMCI_Init_thread_comm(int armci_requested, MPI_Comm comm) {
-
-  if (ARMCII_GLOBAL_STATE.init_count > 0) {
-    ARMCII_GLOBAL_STATE.init_count++;
-    return 0;
-  }
-
-  {
-    int mpi_is_init, mpi_is_fin;
-    MPI_Initialized(&mpi_is_init);
-    MPI_Finalized(&mpi_is_fin);
-    if (!mpi_is_init || mpi_is_fin) {
-      ARMCII_Error("MPI must be initialized before calling ARMCI_Init");
-    }
-  }
-
-  MPI_Comm_dup(comm, &ARMCI_GROUP_WORLD.comm);
-  { /* inlined ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD) */
-    ARMCI_Group *group = &ARMCI_GROUP_WORLD;
-    if (group->comm != MPI_COMM_NULL) {
-      MPI_Comm_size(group->comm, &group->size);
-      MPI_Comm_rank(group->comm, &group->rank);
-
-    } else {
-      group->rank = -1;
-      group->size =  0;
-    }
-
-    group->noncoll_pgroup_comm = MPI_COMM_NULL;
-
-    group->abs_to_grp = NULL;
-    group->grp_to_abs = NULL;
-  }
-  ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
-
-  ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
-
-  char mpi_library_version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
-  {
-    int len;
-    MPI_Get_library_version(mpi_library_version, &len);
-  }
-
-  ARMCII_GLOBAL_STATE.debug_alloc = ARMCII_Getenv_bool("ARMCI_DEBUG_ALLOC", 0);
-
-  ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
-  ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
-
-  ARMCII_GLOBAL_STATE.iov_checks        = ARMCII_Getenv_bool("ARMCI_IOV_CHECKS", 0);
-  ARMCII_GLOBAL_STATE.iov_batched_limit = ARMCII_Getenv_int("ARMCI_IOV_BATCHED_LIMIT", 0);
-
-  if (ARMCII_GLOBAL_STATE.iov_batched_limit < 0) {
-    ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_BATCHED_LIMIT (%d)\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
-    ARMCII_GLOBAL_STATE.iov_batched_limit = 0;
-  }
-
-  ARMCII_GLOBAL_STATE.iov_dtype_chunk = ARMCII_Getenv_int("ARMCI_IOV_DTYPE_CHUNK", 1);
-  if (ARMCII_GLOBAL_STATE.iov_dtype_chunk < 0) {
-    ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_DTYPE_CHUNK (%d)\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
-    ARMCII_GLOBAL_STATE.iov_dtype_chunk = 0;
-  }
-
-  char *var = ARMCII_Getenv("ARMCI_IOV_METHOD");
-  if (var != NULL) {
-    if (strcmp(var, "AUTO") == 0)
-      ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_AUTO;
-    else if (strcmp(var, "CONSRV") == 0)
-      ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_CONSRV;
-    else if (strcmp(var, "BATCHED") == 0)
-      ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_BATCHED;
-    else if (strcmp(var, "DIRECT") == 0)
-      ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
-    else if (ARMCI_GROUP_WORLD.rank == 0)
-      ARMCII_Warning("Ignoring unknown value for ARMCI_IOV_METHOD (%s)\n", var);
-  }
-
-  var = ARMCII_Getenv("ARMCI_STRIDED_METHOD");
-  if (var != NULL) {
-    if (strcmp(var, "IOV") == 0) {
-      ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_IOV;
-    } else if (strcmp(var, "DIRECT") == 0) {
-      ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
-    } else if (ARMCI_GROUP_WORLD.rank == 0) {
-      ARMCII_Warning("Ignoring unknown value for ARMCI_STRIDED_METHOD (%s)\n", var);
-    }
-  }
-
-  ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
-
-  var = ARMCII_Getenv("ARMCI_SHR_BUF_METHOD");
-  if (var != NULL) {
-    if (strcmp(var, "COPY") == 0) {
-      ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_COPY;
-    } else if (strcmp(var, "NOGUARD") == 0) {
-      ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
-    } else if (ARMCI_GROUP_WORLD.rank == 0) {
-      ARMCII_Warning("Ignoring unknown value for ARMCI_SHR_BUF_METHOD (%s)\n", var);
-    }
-  }
-
-  ARMCII_GLOBAL_STATE.use_win_allocate = ARMCII_Getenv_bool("ARMCI_USE_WIN_ALLOCATE", 1);
-  ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
-  ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
-  ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
-  ARMCII_GLOBAL_STATE.rma_atomicity=ARMCII_Getenv_bool("ARMCI_RMA_ATOMICITY", 1);
-  ARMCII_GLOBAL_STATE.end_to_end_flush=ARMCII_Getenv_bool("ARMCI_NO_FLUSH_LOCAL", 0);
-  ARMCII_GLOBAL_STATE.rma_nocheck=ARMCII_Getenv_bool("ARMCI_RMA_NOCHECK", 1);
-  ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", 1);
-  ARMCII_GLOBAL_STATE.flush_request_atomics=ARMCII_Getenv_bool("ARMCI_FLUSH_REQUEST_ATOMICS", 0);
-
-  ARMCII_GLOBAL_STATE.init_count++;
-
-  if (ARMCII_GLOBAL_STATE.verbose > 0) {
-    if (ARMCI_GROUP_WORLD.rank == 0) {
-      int major, minor;
-
-      MPI_Get_version(&major, &minor);
-
-      printf("ARMCI-MPI initialized with %d process%s, MPI v%d.%d\n",
-             ARMCI_GROUP_WORLD.size, ARMCI_GROUP_WORLD.size > 1 ? "es":"", major, minor);
-
-        printf("=======\n");
-        printf("  MPI library version    = %s", mpi_library_version);
-        printf("=======\n");
-
-      printf("  EXPLICIT_NB_PROGRESS   = %s\n", ARMCII_GLOBAL_STATE.explicit_nb_progress ? "ENABLED" : "DISABLED");
-
-      printf("  SHM_LIMIT              = %s\n", "UNLIMITED");
-
-      if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
-          printf("  WINDOW type used       = %s\n", "CREATE");
-      }
-      else if (ARMCII_GLOBAL_STATE.use_win_allocate == 1) {
-          printf("  WINDOW type used       = %s\n", "ALLOCATE");
-      }
-      else {
-          ARMCII_Error("You have selected an invalid window type (%d)!\n", ARMCII_GLOBAL_STATE.use_win_allocate);
-      }
-
-      printf("  STRIDED_METHOD         = %s\n", ARMCII_Strided_methods_str[ARMCII_GLOBAL_STATE.strided_method]);
-      printf("  IOV_METHOD             = %s\n", ARMCII_Iov_methods_str[ARMCII_GLOBAL_STATE.iov_method]);
-
-      if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_BATCHED || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_AUTO) {
-        if (ARMCII_GLOBAL_STATE.iov_batched_limit > 0) {
-          printf("  IOV_BATCHED_LIMIT      = %d\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
-        } else {
-          printf("  IOV_BATCHED_LIMIT      = UNLIMITED\n");
-        }
-      }
-
-      if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_DIRECT || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_AUTO) {
-        if (ARMCII_GLOBAL_STATE.iov_dtype_chunk > 0)
-          printf("  IOV_DTYPE_CHUNK        = %d\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
-        else
-          printf("  IOV_DTYPE_CHUNK        = UNLIMITED\n");
-      }
-
-      printf("  RMA_ATOMICITY          = %s\n", ARMCII_GLOBAL_STATE.rma_atomicity          ? "TRUE" : "FALSE");
-      printf("  NO_FLUSH_LOCAL         = %s\n", ARMCII_GLOBAL_STATE.end_to_end_flush       ? "TRUE" : "FALSE");
-      printf("  RMA_NOCHECK            = %s\n", ARMCII_GLOBAL_STATE.rma_nocheck            ? "TRUE" : "FALSE");
-      printf("  MSG_BARRIER_SYNCS      = %s\n", ARMCII_GLOBAL_STATE.msg_barrier_syncs      ? "TRUE" : "FALSE");
-      printf("  USE_REQUEST_ATOMICS    = %s\n", ARMCII_GLOBAL_STATE.use_request_atomics    ? "TRUE" : "FALSE");
-      printf("  FLUSH_REQUEST_ATOMICS  = %s\n", ARMCII_GLOBAL_STATE.flush_request_atomics  ? "TRUE" : "FALSE");
-      printf("  USE_RMA_REQUESTS       = %s\n", "TRUE");
-      printf("  USE_ALLOC_SHM          = %s\n", ARMCII_GLOBAL_STATE.use_alloc_shm          ? "TRUE" : "FALSE");
-      printf("  IOV_CHECKS             = %s\n", ARMCII_GLOBAL_STATE.iov_checks             ? "TRUE" : "FALSE");
-      printf("  SHR_BUF_METHOD         = %s\n", ARMCII_Shr_buf_methods_str[ARMCII_GLOBAL_STATE.shr_buf_method]);
-      printf("  DEBUG_ALLOC            = %s\n", ARMCII_GLOBAL_STATE.debug_alloc            ? "TRUE" : "FALSE");
-      printf("\n");
-      fflush(NULL);
-    }
-
-    MPI_Barrier(ARMCI_GROUP_WORLD.comm);
-  }
-
-  return 0;
-}
-
-int PARMCI_Finalize(void) {
-  int nfreed;
-
-  if (ARMCII_GLOBAL_STATE.init_count == 0) {
-    return 0;
-  }
-
-  ARMCII_GLOBAL_STATE.init_count--;
-
-  if (ARMCII_GLOBAL_STATE.init_count > 0) {
-    return 0;
-  }
-
-  nfreed = 0;   /* inlined gmr_destroy_all() */
-  while (gmr_list != NULL) {
-    { /* inlined gmr_destroy(gmr_list, &gmr_list->group) */
-      gmr_t *mreg = gmr_list;
-      ARMCI_Group *group = &gmr_list->group;
-      int search_proc_in, search_proc_out, search_proc_out_grp;
-      void *search_base = NULL;
-      int alloc_me, alloc_nproc, world_me, world_nproc;
-      MPI_Comm_rank(group->comm, &alloc_me);
-      MPI_Comm_size(group->comm, &alloc_nproc);
-      MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
-      MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
-      if (mreg == NULL) search_proc_in = -1;
-      else { search_proc_in = world_me; search_base = mreg->slices[world_me].base; }
-      MPI_Allreduce(&search_proc_in, &search_proc_out, 1, MPI_INT, MPI_MAX, group->comm);
-      if (search_proc_out >= 0) {
-        search_proc_out_grp = search_proc_out;
-        MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
-        if (mreg == NULL) {
-          void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
-          gmr_t *m = gmr_list;
-          while (m != NULL) {
-            ARMCII_Assert(lk_proc < m->nslices);
-            if (lk_proc < m->nslices) {
-              const uint8_t   *base = m->slices[lk_proc].base;
-              const gmr_size_t sz   = m->slices[lk_proc].size;
-              if ((uint8_t*)lk_ptr >= base && (uint8_t*)lk_ptr < base + sz) break;
-            }
-            m = m->next;
-          }
-          mreg = m;
-        }
-        ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
-        if (mreg->prev == NULL) {
-          ARMCII_Assert(gmr_list == mreg);
-          gmr_list = mreg->next;
-          if (mreg->next != NULL) mreg->next->prev = NULL;
-        } else {
-          mreg->prev->next = mreg->next;
-          if (mreg->next != NULL) mreg->next->prev = mreg->prev;
-        }
-        ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-        MPI_Win_unlock_all(mreg->window);
-        MPI_Win_free(&mreg->window);
-        if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
-          if (mreg->slices[world_me].base != NULL) MPI_Free_mem(mreg->slices[world_me].base);
-        }
-        free(mreg->slices);
-        free(mreg);
-      }
-    }
-    nfreed++;
-  }
-
-  if (nfreed > 0 && ARMCI_GROUP_WORLD.rank == 0) {
-    ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
-  }
-
-  { /* inlined ARMCI_Group_free(&ARMCI_GROUP_WORLD) */
-    ARMCI_Group *group = &ARMCI_GROUP_WORLD;
-    if (group->comm != MPI_COMM_NULL) {
-      MPI_Comm_free(&group->comm);
-    }
-
-    if (group->abs_to_grp != NULL)
-      free(group->abs_to_grp);
-    if (group->grp_to_abs != NULL)
-      free(group->grp_to_abs);
-
-    group->rank = -1;
-    group->size = 0;
-  }
-
-  return 0;
-}
 
 /* DO NOT INLINE ANYTHING BELOW HERE */
 
@@ -1452,12 +1183,266 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &me);
     MPI_Comm_size(MPI_COMM_WORLD, &nproc);
-    PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD);   /* inlined PARMCI_Init() */
+    { /* inlined PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD) */
+      MPI_Comm comm = MPI_COMM_WORLD;
+      if (ARMCII_GLOBAL_STATE.init_count > 0) {
+        ARMCII_GLOBAL_STATE.init_count++;
+      } else {
+    
+      {
+        int mpi_is_init, mpi_is_fin;
+        MPI_Initialized(&mpi_is_init);
+        MPI_Finalized(&mpi_is_fin);
+        if (!mpi_is_init || mpi_is_fin) {
+          ARMCII_Error("MPI must be initialized before calling ARMCI_Init");
+        }
+      }
+    
+      MPI_Comm_dup(comm, &ARMCI_GROUP_WORLD.comm);
+      { /* inlined ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD) */
+        ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+        if (group->comm != MPI_COMM_NULL) {
+          MPI_Comm_size(group->comm, &group->size);
+          MPI_Comm_rank(group->comm, &group->rank);
+    
+        } else {
+          group->rank = -1;
+          group->size =  0;
+        }
+    
+        group->noncoll_pgroup_comm = MPI_COMM_NULL;
+    
+        group->abs_to_grp = NULL;
+        group->grp_to_abs = NULL;
+      }
+      ARMCI_GROUP_DEFAULT = ARMCI_GROUP_WORLD;
+    
+      ARMCII_GLOBAL_STATE.verbose = ARMCII_Getenv_int("ARMCI_VERBOSE", 0);
+    
+      char mpi_library_version[MPI_MAX_LIBRARY_VERSION_STRING] = {0};
+      {
+        int len;
+        MPI_Get_library_version(mpi_library_version, &len);
+      }
+    
+      ARMCII_GLOBAL_STATE.debug_alloc = ARMCII_Getenv_bool("ARMCI_DEBUG_ALLOC", 0);
+    
+      ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
+      ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
+    
+      ARMCII_GLOBAL_STATE.iov_checks        = ARMCII_Getenv_bool("ARMCI_IOV_CHECKS", 0);
+      ARMCII_GLOBAL_STATE.iov_batched_limit = ARMCII_Getenv_int("ARMCI_IOV_BATCHED_LIMIT", 0);
+    
+      if (ARMCII_GLOBAL_STATE.iov_batched_limit < 0) {
+        ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_BATCHED_LIMIT (%d)\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
+        ARMCII_GLOBAL_STATE.iov_batched_limit = 0;
+      }
+    
+      ARMCII_GLOBAL_STATE.iov_dtype_chunk = ARMCII_Getenv_int("ARMCI_IOV_DTYPE_CHUNK", 1);
+      if (ARMCII_GLOBAL_STATE.iov_dtype_chunk < 0) {
+        ARMCII_Warning("Ignoring invalid value for ARMCI_IOV_DTYPE_CHUNK (%d)\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
+        ARMCII_GLOBAL_STATE.iov_dtype_chunk = 0;
+      }
+    
+      char *var = ARMCII_Getenv("ARMCI_IOV_METHOD");
+      if (var != NULL) {
+        if (strcmp(var, "AUTO") == 0)
+          ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_AUTO;
+        else if (strcmp(var, "CONSRV") == 0)
+          ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_CONSRV;
+        else if (strcmp(var, "BATCHED") == 0)
+          ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_BATCHED;
+        else if (strcmp(var, "DIRECT") == 0)
+          ARMCII_GLOBAL_STATE.iov_method = ARMCII_IOV_DIRECT;
+        else if (ARMCI_GROUP_WORLD.rank == 0)
+          ARMCII_Warning("Ignoring unknown value for ARMCI_IOV_METHOD (%s)\n", var);
+      }
+    
+      var = ARMCII_Getenv("ARMCI_STRIDED_METHOD");
+      if (var != NULL) {
+        if (strcmp(var, "IOV") == 0) {
+          ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_IOV;
+        } else if (strcmp(var, "DIRECT") == 0) {
+          ARMCII_GLOBAL_STATE.strided_method = ARMCII_STRIDED_DIRECT;
+        } else if (ARMCI_GROUP_WORLD.rank == 0) {
+          ARMCII_Warning("Ignoring unknown value for ARMCI_STRIDED_METHOD (%s)\n", var);
+        }
+      }
+    
+      ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
+    
+      var = ARMCII_Getenv("ARMCI_SHR_BUF_METHOD");
+      if (var != NULL) {
+        if (strcmp(var, "COPY") == 0) {
+          ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_COPY;
+        } else if (strcmp(var, "NOGUARD") == 0) {
+          ARMCII_GLOBAL_STATE.shr_buf_method = ARMCII_SHR_BUF_NOGUARD;
+        } else if (ARMCI_GROUP_WORLD.rank == 0) {
+          ARMCII_Warning("Ignoring unknown value for ARMCI_SHR_BUF_METHOD (%s)\n", var);
+        }
+      }
+    
+      ARMCII_GLOBAL_STATE.use_win_allocate = ARMCII_Getenv_bool("ARMCI_USE_WIN_ALLOCATE", 1);
+      ARMCII_GLOBAL_STATE.msg_barrier_syncs = ARMCII_Getenv_bool("ARMCI_MSG_BARRIER_SYNCS", 0);
+      ARMCII_GLOBAL_STATE.explicit_nb_progress=ARMCII_Getenv_bool("ARMCI_EXPLICIT_NB_PROGRESS", 1);
+      ARMCII_GLOBAL_STATE.use_alloc_shm=ARMCII_Getenv_bool("ARMCI_USE_ALLOC_SHM", 1);
+      ARMCII_GLOBAL_STATE.rma_atomicity=ARMCII_Getenv_bool("ARMCI_RMA_ATOMICITY", 1);
+      ARMCII_GLOBAL_STATE.end_to_end_flush=ARMCII_Getenv_bool("ARMCI_NO_FLUSH_LOCAL", 0);
+      ARMCII_GLOBAL_STATE.rma_nocheck=ARMCII_Getenv_bool("ARMCI_RMA_NOCHECK", 1);
+      ARMCII_GLOBAL_STATE.use_request_atomics=ARMCII_Getenv_bool("ARMCI_USE_REQUEST_ATOMICS", 1);
+      ARMCII_GLOBAL_STATE.flush_request_atomics=ARMCII_Getenv_bool("ARMCI_FLUSH_REQUEST_ATOMICS", 0);
+    
+      ARMCII_GLOBAL_STATE.init_count++;
+    
+      if (ARMCII_GLOBAL_STATE.verbose > 0) {
+        if (ARMCI_GROUP_WORLD.rank == 0) {
+          int major, minor;
+    
+          MPI_Get_version(&major, &minor);
+    
+          printf("ARMCI-MPI initialized with %d process%s, MPI v%d.%d\n",
+                 ARMCI_GROUP_WORLD.size, ARMCI_GROUP_WORLD.size > 1 ? "es":"", major, minor);
+    
+            printf("=======\n");
+            printf("  MPI library version    = %s", mpi_library_version);
+            printf("=======\n");
+    
+          printf("  EXPLICIT_NB_PROGRESS   = %s\n", ARMCII_GLOBAL_STATE.explicit_nb_progress ? "ENABLED" : "DISABLED");
+    
+          printf("  SHM_LIMIT              = %s\n", "UNLIMITED");
+    
+          if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
+              printf("  WINDOW type used       = %s\n", "CREATE");
+          }
+          else if (ARMCII_GLOBAL_STATE.use_win_allocate == 1) {
+              printf("  WINDOW type used       = %s\n", "ALLOCATE");
+          }
+          else {
+              ARMCII_Error("You have selected an invalid window type (%d)!\n", ARMCII_GLOBAL_STATE.use_win_allocate);
+          }
+    
+          printf("  STRIDED_METHOD         = %s\n", ARMCII_Strided_methods_str[ARMCII_GLOBAL_STATE.strided_method]);
+          printf("  IOV_METHOD             = %s\n", ARMCII_Iov_methods_str[ARMCII_GLOBAL_STATE.iov_method]);
+    
+          if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_BATCHED || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_AUTO) {
+            if (ARMCII_GLOBAL_STATE.iov_batched_limit > 0) {
+              printf("  IOV_BATCHED_LIMIT      = %d\n", ARMCII_GLOBAL_STATE.iov_batched_limit);
+            } else {
+              printf("  IOV_BATCHED_LIMIT      = UNLIMITED\n");
+            }
+          }
+    
+          if (ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_DIRECT || ARMCII_GLOBAL_STATE.iov_method == ARMCII_IOV_AUTO) {
+            if (ARMCII_GLOBAL_STATE.iov_dtype_chunk > 0)
+              printf("  IOV_DTYPE_CHUNK        = %d\n", ARMCII_GLOBAL_STATE.iov_dtype_chunk);
+            else
+              printf("  IOV_DTYPE_CHUNK        = UNLIMITED\n");
+          }
+    
+          printf("  RMA_ATOMICITY          = %s\n", ARMCII_GLOBAL_STATE.rma_atomicity          ? "TRUE" : "FALSE");
+          printf("  NO_FLUSH_LOCAL         = %s\n", ARMCII_GLOBAL_STATE.end_to_end_flush       ? "TRUE" : "FALSE");
+          printf("  RMA_NOCHECK            = %s\n", ARMCII_GLOBAL_STATE.rma_nocheck            ? "TRUE" : "FALSE");
+          printf("  MSG_BARRIER_SYNCS      = %s\n", ARMCII_GLOBAL_STATE.msg_barrier_syncs      ? "TRUE" : "FALSE");
+          printf("  USE_REQUEST_ATOMICS    = %s\n", ARMCII_GLOBAL_STATE.use_request_atomics    ? "TRUE" : "FALSE");
+          printf("  FLUSH_REQUEST_ATOMICS  = %s\n", ARMCII_GLOBAL_STATE.flush_request_atomics  ? "TRUE" : "FALSE");
+          printf("  USE_RMA_REQUESTS       = %s\n", "TRUE");
+          printf("  USE_ALLOC_SHM          = %s\n", ARMCII_GLOBAL_STATE.use_alloc_shm          ? "TRUE" : "FALSE");
+          printf("  IOV_CHECKS             = %s\n", ARMCII_GLOBAL_STATE.iov_checks             ? "TRUE" : "FALSE");
+          printf("  SHR_BUF_METHOD         = %s\n", ARMCII_Shr_buf_methods_str[ARMCII_GLOBAL_STATE.shr_buf_method]);
+          printf("  DEBUG_ALLOC            = %s\n", ARMCII_GLOBAL_STATE.debug_alloc            ? "TRUE" : "FALSE");
+          printf("\n");
+          fflush(NULL);
+        }
+    
+        MPI_Barrier(ARMCI_GROUP_WORLD.comm);
+      }
+      }
+    }
     if (me == 0) printf("standalone test_vector_acc: %d procs\n", nproc);
     test_vector_acc();
     MPI_Barrier(MPI_COMM_WORLD);
     if (me == 0) printf("DONE OK\n");
-    PARMCI_Finalize();
+    { /* inlined PARMCI_Finalize() */
+      int nfreed;
+      if (ARMCII_GLOBAL_STATE.init_count != 0) {
+        ARMCII_GLOBAL_STATE.init_count--;
+        if (ARMCII_GLOBAL_STATE.init_count == 0) {
+    
+      nfreed = 0;   /* inlined gmr_destroy_all() */
+      while (gmr_list != NULL) {
+        { /* inlined gmr_destroy(gmr_list, &gmr_list->group) */
+          gmr_t *mreg = gmr_list;
+          ARMCI_Group *group = &gmr_list->group;
+          int search_proc_in, search_proc_out, search_proc_out_grp;
+          void *search_base = NULL;
+          int alloc_me, alloc_nproc, world_me, world_nproc;
+          MPI_Comm_rank(group->comm, &alloc_me);
+          MPI_Comm_size(group->comm, &alloc_nproc);
+          MPI_Comm_rank(ARMCI_GROUP_WORLD.comm, &world_me);
+          MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
+          if (mreg == NULL) search_proc_in = -1;
+          else { search_proc_in = world_me; search_base = mreg->slices[world_me].base; }
+          MPI_Allreduce(&search_proc_in, &search_proc_out, 1, MPI_INT, MPI_MAX, group->comm);
+          if (search_proc_out >= 0) {
+            search_proc_out_grp = search_proc_out;
+            MPI_Bcast(&search_base, sizeof(void*), MPI_BYTE, search_proc_out_grp, group->comm);
+            if (mreg == NULL) {
+              void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
+              gmr_t *m = gmr_list;
+              while (m != NULL) {
+                ARMCII_Assert(lk_proc < m->nslices);
+                if (lk_proc < m->nslices) {
+                  const uint8_t   *base = m->slices[lk_proc].base;
+                  const gmr_size_t sz   = m->slices[lk_proc].size;
+                  if ((uint8_t*)lk_ptr >= base && (uint8_t*)lk_ptr < base + sz) break;
+                }
+                m = m->next;
+              }
+              mreg = m;
+            }
+            ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
+            if (mreg->prev == NULL) {
+              ARMCII_Assert(gmr_list == mreg);
+              gmr_list = mreg->next;
+              if (mreg->next != NULL) mreg->next->prev = NULL;
+            } else {
+              mreg->prev->next = mreg->next;
+              if (mreg->next != NULL) mreg->next->prev = mreg->prev;
+            }
+            ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
+            MPI_Win_unlock_all(mreg->window);
+            MPI_Win_free(&mreg->window);
+            if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
+              if (mreg->slices[world_me].base != NULL) MPI_Free_mem(mreg->slices[world_me].base);
+            }
+            free(mreg->slices);
+            free(mreg);
+          }
+        }
+        nfreed++;
+      }
+    
+      if (nfreed > 0 && ARMCI_GROUP_WORLD.rank == 0) {
+        ARMCII_Warning("Freed %d leaked allocations\n", nfreed);
+      }
+    
+      { /* inlined ARMCI_Group_free(&ARMCI_GROUP_WORLD) */
+        ARMCI_Group *group = &ARMCI_GROUP_WORLD;
+        if (group->comm != MPI_COMM_NULL) {
+          MPI_Comm_free(&group->comm);
+        }
+    
+        if (group->abs_to_grp != NULL)
+          free(group->abs_to_grp);
+        if (group->grp_to_abs != NULL)
+          free(group->grp_to_abs);
+    
+        group->rank = -1;
+        group->size = 0;
+      }
+        }
+      }
+    }
     MPI_Finalize();
     return 0;
 }
