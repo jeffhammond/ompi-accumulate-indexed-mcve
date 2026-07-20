@@ -22,7 +22,7 @@ int main(int argc, char **argv)
     {
         MPI_Info win_info = MPI_INFO_NULL;
         MPI_Info_create(&win_info);
-        MPI_Info_set(win_info, "alloc_shm", "true");
+        MPI_Info_set(win_info, "alloc_shm", "false");
         MPI_Win_allocate((MPI_Aint)bytes, 1, win_info, MPI_COMM_WORLD,
                          &b, &window);
         MPI_Info_free(&win_info);
