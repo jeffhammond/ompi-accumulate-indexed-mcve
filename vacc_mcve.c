@@ -11,16 +11,12 @@
 #define MAX(A,B) (((A) > (B)) ? A : B)
 #define ABS(a) (((a) <0) ? -(a) : (a))
 
-typedef long armci_size_t;
-
 typedef struct {
     void **src_ptr_array;
     void **dst_ptr_array;
     int    bytes;
     int    ptr_array_len;
 } armci_giov_t;
-
-typedef armci_size_t gmr_size_t;
 
 typedef struct gmr_s {
     void **slices;
@@ -377,9 +373,9 @@ static void test_vector_acc(void)
         void * const dst = c;
         const int size = bytes;
         const int target = proc;
-        const gmr_size_t disp = src == MPI_BOTTOM ? 0 :
-            (gmr_size_t)((uint8_t*)src - (uint8_t*)mreg->slices[target]);
-        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, target, (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, window);
+        const MPI_Aint disp = (MPI_Aint)((uint8_t*)src -
+                                        (uint8_t*)mreg->slices[target]);
+        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, target, disp, size, MPI_BYTE, MPI_NO_OP, window);
         MPI_Win_flush(target, window);
     }
 
