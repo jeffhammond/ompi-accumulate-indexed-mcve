@@ -16,20 +16,10 @@
 #define MIN(A,B) (((A) < (B)) ? (A) : (B))
 #define ABS(a) (((a) <0) ? -(a) : (a))
 
-enum  ARMCI_Acc_e { ARMCI_ACC_DBL };
-
 typedef long armci_size_t;
 #define ARMCII_MPI_SIZE_T MPI_LONG
 
 void  ARMCI_Error(const char *msg, int code);
-
-typedef struct armci_hdl_s
-{
-    int batch_size;
-    MPI_Request single_request;
-    MPI_Request *request_array;
-}
-armci_hdl_t;
 
 typedef struct {
   void **src_ptr_array;
@@ -53,7 +43,6 @@ extern ARMCI_Group ARMCI_GROUP_DEFAULT;
 
 
 
-void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 
 #define ARMCII_Error(...) ARMCII_Error_impl(__FILE__,__LINE__,__func__,__VA_ARGS__)
 void    ARMCII_Error_impl(const char *file, const int line, const char *func, const char *msg, ...);
