@@ -80,8 +80,7 @@ int main(int argc, char **argv)
     MPI_Win_flush_all(window);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    MPI_Get_accumulate(NULL, 0, MPI_BYTE, c, bytes, MPI_BYTE, 0, 0, bytes,
-                       MPI_BYTE, MPI_NO_OP, window);
+    MPI_Get(c, bytes, MPI_BYTE, 0, 0, bytes, MPI_BYTE, window);
     MPI_Win_flush(0, window);
 
     const double scale = 10.0*world_np*world_np;
