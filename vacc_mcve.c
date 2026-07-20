@@ -853,17 +853,7 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &me);
     MPI_Comm_size(MPI_COMM_WORLD, &nproc);
     { /* inlined PARMCI_Init_thread_comm(MPI_THREAD_SINGLE, MPI_COMM_WORLD); init_count folded (called once) */
-      MPI_Comm comm = MPI_COMM_WORLD;
-      {
-        int mpi_is_init, mpi_is_fin;
-        MPI_Initialized(&mpi_is_init);
-        MPI_Finalized(&mpi_is_fin);
-        if (!mpi_is_init || mpi_is_fin) {
-          ARMCII_Error("MPI must be initialized before calling ARMCI_Init");
-        }
-      }
-
-      MPI_Comm_dup(comm, &ARMCI_GROUP_WORLD.comm);
+      MPI_Comm_dup(MPI_COMM_WORLD, &ARMCI_GROUP_WORLD.comm);
       { /* inlined ARMCII_Group_init_from_comm(&ARMCI_GROUP_WORLD) */
         ARMCI_Group *group = &ARMCI_GROUP_WORLD;
         if (group->comm != MPI_COMM_NULL) {
