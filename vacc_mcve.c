@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <math.h>
-#include <float.h>
 #include <unistd.h>
 
 #include <mpi.h>
@@ -186,28 +184,18 @@ static void test_vector_acc(void)
                 const int count = iov[v].ptr_array_len;
                 const int size = iov[v].bytes;
                 void ** const src_buf = malloc((count+1)*sizeof(void*));
-                src_buf[count] = NULL;
+                char *contig;
+                MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
+                src_buf[count] = contig;
 
-                const int scaled = (fabs(alpha - 1.0) < DBL_EPSILON) ? 0 : 1;
-
-                if (scaled) {
-                    char *contig;
-                    MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                    src_buf[count] = contig;
-
-                    for (int i = 0; i < count; i++) {
-                        src_buf[i] = contig + (MPI_Aint)i*size;
-                        {
-                            const int nelem = size / (int)sizeof(double);
-                            double * const s_in = (double*) orig_bufs[i];
-                            double * const s_out = (double*) src_buf[i];
-                            const double s = alpha;
-                            for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
-                        }
-                    }
-                } else {
-                    for (int i = 0; i < count; i++) {
-                        src_buf[i] = orig_bufs[i];
+                for (int i = 0; i < count; i++) {
+                    src_buf[i] = contig + (MPI_Aint)i*size;
+                    {
+                        const int nelem = size / (int)sizeof(double);
+                        double * const s_in = (double*) orig_bufs[i];
+                        double * const s_out = (double*) src_buf[i];
+                        const double s = alpha;
+                        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
                     }
                 }
 
@@ -255,15 +243,7 @@ static void test_vector_acc(void)
                     MPI_Win_flush_local(proc, window);
                 }
 
-                if (src_buf[count] != NULL) {
-                    MPI_Free_mem(src_buf[count]);
-                } else {
-                    for (int i = 0; i < count; i++) {
-                        if (orig_bufs[i] != src_buf[i]) {
-                            MPI_Free_mem(src_buf[i]);
-                        }
-                    }
-                }
+                MPI_Free_mem(src_buf[count]);
                 free(src_buf);
             }
         }
@@ -282,28 +262,18 @@ static void test_vector_acc(void)
                 const int count = iov[v].ptr_array_len;
                 const int size = iov[v].bytes;
                 void ** const src_buf = malloc((count+1)*sizeof(void*));
-                src_buf[count] = NULL;
+                char *contig;
+                MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
+                src_buf[count] = contig;
 
-                const int scaled = (fabs(alpha - 1.0) < DBL_EPSILON) ? 0 : 1;
-
-                if (scaled) {
-                    char *contig;
-                    MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                    src_buf[count] = contig;
-
-                    for (int i = 0; i < count; i++) {
-                        src_buf[i] = contig + (MPI_Aint)i*size;
-                        {
-                            const int nelem = size / (int)sizeof(double);
-                            double * const s_in = (double*) orig_bufs[i];
-                            double * const s_out = (double*) src_buf[i];
-                            const double s = alpha;
-                            for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
-                        }
-                    }
-                } else {
-                    for (int i = 0; i < count; i++) {
-                        src_buf[i] = orig_bufs[i];
+                for (int i = 0; i < count; i++) {
+                    src_buf[i] = contig + (MPI_Aint)i*size;
+                    {
+                        const int nelem = size / (int)sizeof(double);
+                        double * const s_in = (double*) orig_bufs[i];
+                        double * const s_out = (double*) src_buf[i];
+                        const double s = alpha;
+                        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
                     }
                 }
 
@@ -351,15 +321,7 @@ static void test_vector_acc(void)
                     MPI_Win_flush_local(proc, window);
                 }
 
-                if (src_buf[count] != NULL) {
-                    MPI_Free_mem(src_buf[count]);
-                } else {
-                    for (int i = 0; i < count; i++) {
-                        if (orig_bufs[i] != src_buf[i]) {
-                            MPI_Free_mem(src_buf[i]);
-                        }
-                    }
-                }
+                MPI_Free_mem(src_buf[count]);
                 free(src_buf);
             }
         }
