@@ -26,73 +26,6 @@ MPI_Win window = MPI_WIN_NULL;
 #define MAXPROC 128
 int world_me, world_np;
 
-static void compare_patches(double eps, const double *patch1,
-                            const int lo1[], const int hi1[],
-                            const double *patch2,
-                            const int lo2[], const int hi2[])
-
-{
-    const int elems = hi1[0]-lo1[0]+1;
-    int subscr1 = lo1[0], subscr2 = lo2[0];
-    int offset1 = 0, offset2 = 0;
-
-    for (int j=0; j< elems; j++){
-        int idx1 = subscr1;
-        int idx2 = subscr2;
-
-        if(j==0){
-            offset1 =idx1;
-            offset2 =idx2;
-        }
-        idx1 -= offset1;
-        idx2 -= offset2;
-
-        const double diff = patch1[idx1] - patch2[idx2];
-        double max = MAX(ABS(patch1[idx1]),ABS(patch2[idx2]));
-        if(max == 0. || max <eps) max = 1.;
-
-        if(eps < ABS(diff)/max){
-            char msg[48];
-            sprintf(msg,"(proc=%d):%f",world_me,patch1[idx1]);
-            printf("ERROR: a [%d] %s", subscr1, msg);
-            sprintf(msg,"%f\n",patch2[idx2]);
-            printf(" b [%d] %s", subscr2, msg);
-            printf("\nA = %f B = %f\n", patch1[idx1], patch2[idx2]);
-            fflush(stdout);
-            sleep(1);
-            fprintf(stderr, "[%d] ARMCI Error: Bailing out\n", world_me);
-            fflush(NULL);
-            MPI_Abort(MPI_COMM_WORLD, 0);
-        }
-
-        if (subscr1 < hi1[0]) subscr1++;
-        else subscr1 = lo1[0];
-        if (subscr2 < hi2[0]) subscr2++;
-        else subscr2 = lo2[0];
-    }
-}
-
-static void scale_patch(double alpha, double *patch1,
-                        const int lo1[], const int hi1[])
-{
-    const int elems = hi1[0]-lo1[0]+1;
-    int subscr1 = lo1[0];
-    int offset1 = 0;
-
-    for (int j=0; j< elems; j++){
-        int idx1 = subscr1;
-
-        if(j==0){
-            offset1 =idx1;
-        }
-        idx1 -= offset1;
-
-        patch1[idx1] *= alpha;
-        if (subscr1 < hi1[0]) subscr1++;
-        else subscr1 = lo1[0];
-    }
-}
-
 static void GetPermutedProcList(int *ProcList)
 {
     for (int i=0; i< world_np; i++) ProcList[i]=i;
@@ -137,7 +70,7 @@ static void test_vector_acc(void)
         MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
     }
     double * const a = malloc(bytes);
-    void * const c = malloc(bytes);
+    double * const c = malloc(bytes);
 
     for (int i = 0; i < 500; i++) {
         a[i] = i % 500;
@@ -330,12 +263,28 @@ static void test_vector_acc(void)
         MPI_Win_flush(target, window);
     }
 
-    const int one = 1;
     const double scale = alpha*100*world_np*world_np;
-    scale_patch(scale, a, &one, &(const int){500});
+    for (int i = 0; i < 500; i++) a[i] *= scale;
 
-    compare_patches(.0001, a, &one, &(const int){500},
-                    c, &one, &(const int){500});
+    for (int i = 0; i < 500; i++) {
+        const double diff = a[i] - c[i];
+        double max = MAX(ABS(a[i]),ABS(c[i]));
+        if(max == 0. || max < .0001) max = 1.;
+
+        if(.0001 < ABS(diff)/max){
+            char msg[48];
+            sprintf(msg,"(proc=%d):%f",world_me,a[i]);
+            printf("ERROR: a [%d] %s", i+1, msg);
+            sprintf(msg,"%f\n",c[i]);
+            printf(" b [%d] %s", i+1, msg);
+            printf("\nA = %f B = %f\n", a[i], c[i]);
+            fflush(stdout);
+            sleep(1);
+            fprintf(stderr, "[%d] ARMCI Error: Bailing out\n", world_me);
+            fflush(NULL);
+            MPI_Abort(MPI_COMM_WORLD, 0);
+        }
+    }
     MPI_Barrier(MPI_COMM_WORLD);
 
     if(0==world_me){
