@@ -5,11 +5,9 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <errno.h>
-#include <execinfo.h>
 #include <limits.h>
 #include <math.h>
 #include <float.h>
-#include <assert.h>
 #include <unistd.h>
 
 #include <mpi.h>
@@ -91,10 +89,6 @@ long  ARMCII_Getenv_long(const char *varname, long default_value);
 void ARMCII_Getenv_char(char * output, const char *varname, const char *default_value, int length);
 
 
-void    ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func);
-#define unlikely(x_) (x_)
-#define ARMCII_Assert(EXPR)          do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, NULL, __FILE__, __LINE__, __func__); } while(0)
-#define ARMCII_Assert_msg(EXPR, MSG) do { if (unlikely(!(EXPR))) ARMCII_Assert_fail(#EXPR, MSG,  __FILE__, __LINE__, __func__); } while(0)
 
 void    ARMCII_Dbg_print_impl(const char *func, const char *format, ...);
 
@@ -141,45 +135,6 @@ void ARMCII_Error_impl(const char *file, const int line, const char *func, const
   fprintf(stderr, "[%d] ARMCI Internal error in %s (%s:%d)\n[%d] Message: %s\n", ARMCI_GROUP_WORLD.rank,
       func, file, line, ARMCI_GROUP_WORLD.rank, string);
   MPI_Abort(ARMCI_GROUP_WORLD.comm, 100);
-}
-
-void ARMCII_Assert_fail(const char *expr, const char *msg, const char *file, int line, const char *func) {
-  int rank;
-
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  if (msg == NULL)
-    fprintf(stderr, "[%d] ARMCI assert fail in %s() [%s:%d]: \"%s\"\n", rank, func, file, line, expr);
-  else
-    fprintf(stderr, "[%d] ARMCI assert fail in %s() [%s:%d]: \"%s\"\n"
-                    "[%d] Message: \"%s\"\n", rank, func, file, line, expr, rank, msg);
-
-  {
-
-    const int SIZE = 100;
-    int    j, nframes;
-    void  *frames[SIZE];
-    char **symbols;
-
-    nframes = backtrace(frames, SIZE);
-    symbols = backtrace_symbols(frames, nframes);
-
-    if (symbols == NULL)
-      perror("Backtrace failure");
-
-    fprintf(stderr, "[%d] Backtrace:\n", rank);
-    for (j = 0; j < nframes; j++)
-      fprintf(stderr, "[%d]  %2d - %s\n", rank, nframes-j-1, symbols[j]);
-
-    free(symbols);
-  }
-
-  fflush(NULL);
-  {
-    double stall = MPI_Wtime();
-    while (MPI_Wtime() - stall < 1) ;
-  }
-  MPI_Abort(MPI_COMM_WORLD, -1);
 }
 
 void ARMCII_Warning(const char *fmt, ...) {
@@ -326,9 +281,6 @@ void compare_patches(double eps, int ndim, double *patch1, int lo1[], int hi1[],
 
 	for(i=0;i<ndim;i++){
 		int diff = hi1[i]-lo1[i];
-		assert(diff == (hi2[i]-lo2[i]));
-		assert(diff < dims1[i]);
-		assert(diff < dims2[i]);
 		elems *= diff+1;
 		subscr1[i]= lo1[i];
 		subscr2[i]=lo2[i];
@@ -379,7 +331,6 @@ void scale_patch(double alpha, int ndim, double *patch1, int lo1[], int hi1[], i
 
 	for(i=0;i<ndim;i++){
 		int diff = hi1[i]-lo1[i];
-		assert(diff < dims1[i]);
 		elems *= diff+1;
 		subscr1[i]= lo1[i];
 	}
@@ -403,7 +354,6 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
 {
      int bytes=elem_size, i, rc;
 
-     assert(ndim<=MAXDIMS);
      for(i=0;i<ndim;i++)bytes*=dims[i];
      /* inlined PARMCI_Malloc -> ARMCI_Malloc_group -> gmr_create */
      { /* inlined gmr_create(bytes, a, &ARMCI_GROUP_WORLD) */
@@ -415,8 +365,6 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
        gmr_t        *mreg;
        gmr_slice_t  *alloc_slices, gmr_slice;
 
-       ARMCII_Assert(local_size >= 0);
-       ARMCII_Assert(group != NULL);
 
        MPI_Comm_rank(group->comm, &alloc_me);
        MPI_Comm_size(group->comm, &alloc_nproc);
@@ -431,11 +379,8 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
          MPI_Comm_size(ARMCI_GROUP_WORLD.comm, &world_nproc);
 
          mreg = malloc(sizeof(gmr_t));
-         ARMCII_Assert(mreg != NULL);
          mreg->slices = malloc(sizeof(gmr_slice_t)*world_nproc);
-         ARMCII_Assert(mreg->slices != NULL);
          alloc_slices = malloc(sizeof(gmr_slice_t)*alloc_nproc);
-         ARMCII_Assert(alloc_slices != NULL);
 
          mreg->group   = *group;
          mreg->nslices = world_nproc;
@@ -452,13 +397,11 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
 
          if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
            if (local_size == 0) alloc_slices[alloc_me].base = NULL;
-           else { MPI_Alloc_mem(local_size, win_info, &(alloc_slices[alloc_me].base));
-                  ARMCII_Assert(alloc_slices[alloc_me].base != NULL); }
+           else { MPI_Alloc_mem(local_size, win_info, &(alloc_slices[alloc_me].base)); }
            MPI_Win_create(alloc_slices[alloc_me].base, (MPI_Aint) local_size, 1, MPI_INFO_NULL, group->comm, &mreg->window);
          } else if (ARMCII_GLOBAL_STATE.use_win_allocate == 1) {
            MPI_Win_allocate( (MPI_Aint) local_size, 1, win_info, group->comm, &(alloc_slices[alloc_me].base), &mreg->window);
            if (local_size == 0) alloc_slices[alloc_me].base = NULL;
-           else ARMCII_Assert(alloc_slices[alloc_me].base != NULL);
          } else {
            ARMCII_Error("invalid window type!\n");
          }
@@ -519,8 +462,6 @@ void create_array(void *a[], int elem_size, int ndim, int dims[])
        }
      }
      rc = 0;
-     assert(rc==0);
-     assert(a[me]);
 
 }
 
@@ -536,7 +477,6 @@ void destroy_array(void *ptr[])
         void *lk_ptr = (fptr); int lk_proc = (ARMCI_GROUP_WORLD.rank);
         gmr_t *m = gmr_list;
         while (m != NULL) {
-          ARMCII_Assert(lk_proc < m->nslices);
           if (lk_proc < m->nslices) {
             const uint8_t   *base = m->slices[lk_proc].base;
             const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -545,7 +485,6 @@ void destroy_array(void *ptr[])
           m = m->next;
         }
         mreg = m;
-        ARMCII_Assert_msg(mreg != NULL, "Invalid shared pointer");
       } else {
         mreg = NULL;
       }
@@ -568,7 +507,6 @@ void destroy_array(void *ptr[])
             void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
             gmr_t *m = gmr_list;
             while (m != NULL) {
-              ARMCII_Assert(lk_proc < m->nslices);
               if (lk_proc < m->nslices) {
                 const uint8_t   *base = m->slices[lk_proc].base;
                 const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -578,16 +516,13 @@ void destroy_array(void *ptr[])
             }
             mreg = m;
           }
-          ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
           if (mreg->prev == NULL) {
-            ARMCII_Assert(gmr_list == mreg);
             gmr_list = mreg->next;
             if (mreg->next != NULL) mreg->next->prev = NULL;
           } else {
             mreg->prev->next = mreg->next;
             if (mreg->next != NULL) mreg->next->prev = mreg->prev;
           }
-          ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
           MPI_Win_unlock_all(mreg->window);
           MPI_Win_free(&mreg->window);
           if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
@@ -599,7 +534,6 @@ void destroy_array(void *ptr[])
       }
       rc = 0;
     }
-    assert(rc==0);
 }
 
 void GetPermutedProcList(int* ProcList)
@@ -638,9 +572,7 @@ void test_vector_acc()
 
         create_array((void**)b, sizeof(double),dim,&elems);
         a = malloc(bytes);
-        assert(a);
         c = malloc(bytes);
-        assert(c);
 
 	init(a, dim, elems, &elems);
 
@@ -688,7 +620,6 @@ void test_vector_acc()
                   int i, scaled;
             
                   new_bufs = malloc((count+1)*sizeof(void*));
-                  ARMCII_Assert(new_bufs != NULL);
                   new_bufs[count] = NULL;
             
                   scaled = (fabs(*((double*)acc_scale) - 1.0) < DBL_EPSILON) ? 0 : 1;   /* inlined ARMCII_Buf_acc_is_scaled (ARMCI_ACC_DBL) */
@@ -696,7 +627,6 @@ void test_vector_acc()
                   if (scaled) {
                     char *contig;
                     MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                    ARMCII_Assert(contig != NULL);
                     new_bufs[count] = contig;
             
                     for (i = 0; i < count; i++) {
@@ -717,7 +647,6 @@ void test_vector_acc()
                         void *lk_ptr = (orig_bufs[i]); int lk_proc = (ARMCI_GROUP_WORLD.rank);
                         gmr_t *m = gmr_list;
                         while (m != NULL) {
-                          ARMCII_Assert(lk_proc < m->nslices);
                           if (lk_proc < m->nslices) {
                             const uint8_t   *base = m->slices[lk_proc].base;
                             const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -732,7 +661,6 @@ void test_vector_acc()
             
                       if (mreg != NULL) {
                         MPI_Alloc_mem(size, MPI_INFO_NULL, &new_bufs[i]);
-                        ARMCII_Assert(new_bufs[i] != NULL);
                         memmove(new_bufs[i], orig_bufs[i], size);
                       }
                     }
@@ -746,7 +674,6 @@ void test_vector_acc()
                   int type_size;
                   MPI_Type_size(type, &type_size);
                   int elem_count = iov[v].bytes/type_size;
-                  ARMCII_Assert_msg(iov[v].bytes % type_size == 0, "Transfer size is not a multiple of type size");
             
                   void **buf_rem = iov[v].dst_ptr_array;   /* ACC: remote = dst */
                   void **buf_loc = src_buf;                /* ACC: local  = src */
@@ -767,7 +694,6 @@ void test_vector_acc()
                     void *lk_ptr = (buf_rem[0]); int lk_proc = (proc);
                     gmr_t *m = gmr_list;
                     while (m != NULL) {
-                      ARMCII_Assert(lk_proc < m->nslices);
                       if (lk_proc < m->nslices) {
                         const uint8_t   *base = m->slices[lk_proc].base;
                         const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -777,7 +703,6 @@ void test_vector_acc()
                     }
                     mreg = m;
                   }
-                  ARMCII_Assert_msg(mreg != NULL, "Invalid remote pointer");
             
                   dst_win_base = mreg->slices[proc].base;
                   dst_win_size = mreg->slices[proc].size;
@@ -797,11 +722,6 @@ void test_vector_acc()
                     off_loc      = (loc_addr[i] - base_loc)/type_size;
                     disp_rem[i]  = (target_rem - base_rem)/type_size;
             
-                    ARMCII_Assert_msg((loc_addr[i] - base_loc) % type_size == 0, "Local transfer offset is not a multiple of type size");
-                    ARMCII_Assert_msg(off_loc <= INT_MAX, "Local segment span exceeds 32-bit element displacement; use ARMCI_IOV_METHOD=BATCHED");
-                    ARMCII_Assert_msg((target_rem - base_rem) % type_size == 0, "Transfer size is not a multiple of type size");
-                    ARMCII_Assert_msg(disp_rem[i] >= 0 && disp_rem[i] < dst_win_size, "Invalid remote pointer");
-                    ARMCII_Assert_msg(((uint8_t*)buf_rem[i]) + elem_count <= ((uint8_t*)dst_win_base) + dst_win_size, "Transfer exceeds buffer length");
                     disp_loc[i]  = (int)off_loc;
                   }
             
@@ -825,9 +745,6 @@ void test_vector_acc()
                   }
             
                   /* blocking=1, flush_local=1 (ACC): inlined gmr_flush(mreg, proc, 1) */
-                  ARMCII_Assert(proc >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
-                  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-                  ARMCII_Assert_msg(proc < mreg->group.size, "grp_proc exceeds group size!");
                   if (ARMCII_GLOBAL_STATE.end_to_end_flush)
                     MPI_Win_flush(proc, mreg->window);
                   else
@@ -879,7 +796,6 @@ void test_vector_acc()
                   int i, scaled;
             
                   new_bufs = malloc((count+1)*sizeof(void*));
-                  ARMCII_Assert(new_bufs != NULL);
                   new_bufs[count] = NULL;
             
                   scaled = (fabs(*((double*)acc_scale) - 1.0) < DBL_EPSILON) ? 0 : 1;   /* inlined ARMCII_Buf_acc_is_scaled (ARMCI_ACC_DBL) */
@@ -887,7 +803,6 @@ void test_vector_acc()
                   if (scaled) {
                     char *contig;
                     MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                    ARMCII_Assert(contig != NULL);
                     new_bufs[count] = contig;
             
                     for (i = 0; i < count; i++) {
@@ -908,7 +823,6 @@ void test_vector_acc()
                         void *lk_ptr = (orig_bufs[i]); int lk_proc = (ARMCI_GROUP_WORLD.rank);
                         gmr_t *m = gmr_list;
                         while (m != NULL) {
-                          ARMCII_Assert(lk_proc < m->nslices);
                           if (lk_proc < m->nslices) {
                             const uint8_t   *base = m->slices[lk_proc].base;
                             const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -923,7 +837,6 @@ void test_vector_acc()
             
                       if (mreg != NULL) {
                         MPI_Alloc_mem(size, MPI_INFO_NULL, &new_bufs[i]);
-                        ARMCII_Assert(new_bufs[i] != NULL);
                         memmove(new_bufs[i], orig_bufs[i], size);
                       }
                     }
@@ -937,7 +850,6 @@ void test_vector_acc()
                   int type_size;
                   MPI_Type_size(type, &type_size);
                   int elem_count = iov[v].bytes/type_size;
-                  ARMCII_Assert_msg(iov[v].bytes % type_size == 0, "Transfer size is not a multiple of type size");
             
                   void **buf_rem = iov[v].dst_ptr_array;   /* ACC: remote = dst */
                   void **buf_loc = src_buf;                /* ACC: local  = src */
@@ -958,7 +870,6 @@ void test_vector_acc()
                     void *lk_ptr = (buf_rem[0]); int lk_proc = (proc);
                     gmr_t *m = gmr_list;
                     while (m != NULL) {
-                      ARMCII_Assert(lk_proc < m->nslices);
                       if (lk_proc < m->nslices) {
                         const uint8_t   *base = m->slices[lk_proc].base;
                         const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -968,7 +879,6 @@ void test_vector_acc()
                     }
                     mreg = m;
                   }
-                  ARMCII_Assert_msg(mreg != NULL, "Invalid remote pointer");
             
                   dst_win_base = mreg->slices[proc].base;
                   dst_win_size = mreg->slices[proc].size;
@@ -988,11 +898,6 @@ void test_vector_acc()
                     off_loc      = (loc_addr[i] - base_loc)/type_size;
                     disp_rem[i]  = (target_rem - base_rem)/type_size;
             
-                    ARMCII_Assert_msg((loc_addr[i] - base_loc) % type_size == 0, "Local transfer offset is not a multiple of type size");
-                    ARMCII_Assert_msg(off_loc <= INT_MAX, "Local segment span exceeds 32-bit element displacement; use ARMCI_IOV_METHOD=BATCHED");
-                    ARMCII_Assert_msg((target_rem - base_rem) % type_size == 0, "Transfer size is not a multiple of type size");
-                    ARMCII_Assert_msg(disp_rem[i] >= 0 && disp_rem[i] < dst_win_size, "Invalid remote pointer");
-                    ARMCII_Assert_msg(((uint8_t*)buf_rem[i]) + elem_count <= ((uint8_t*)dst_win_base) + dst_win_size, "Transfer exceeds buffer length");
                     disp_loc[i]  = (int)off_loc;
                   }
             
@@ -1016,9 +921,6 @@ void test_vector_acc()
                   }
             
                   /* blocking=1, flush_local=1 (ACC): inlined gmr_flush(mreg, proc, 1) */
-                  ARMCII_Assert(proc >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
-                  ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-                  ARMCII_Assert_msg(proc < mreg->group.size, "grp_proc exceeds group size!");
                   if (ARMCII_GLOBAL_STATE.end_to_end_flush)
                     MPI_Win_flush(proc, mreg->window);
                   else
@@ -1069,7 +971,6 @@ void test_vector_acc()
 	    void *lk_ptr = (src); int lk_proc = (target);
 	    gmr_t *m = gmr_list;
 	    while (m != NULL) {
-	      ARMCII_Assert(lk_proc < m->nslices);
 	      if (lk_proc < m->nslices) {
 	        const uint8_t   *base = m->slices[lk_proc].base;
 	        const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -1084,7 +985,6 @@ void test_vector_acc()
 	    void *lk_ptr = (dst); int lk_proc = (ARMCI_GROUP_WORLD.rank);
 	    gmr_t *m = gmr_list;
 	    while (m != NULL) {
-	      ARMCII_Assert(lk_proc < m->nslices);
 	      if (lk_proc < m->nslices) {
 	        const uint8_t   *base = m->slices[lk_proc].base;
 	        const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -1097,25 +997,19 @@ void test_vector_acc()
 	  else
 	    dst_mreg = NULL;
 
-	  ARMCII_Assert_msg(src_mreg != NULL, "Invalid remote pointer");
 
 	  if (target == ARMCI_GROUP_WORLD.rank && dst_mreg == NULL) {
 	    memmove(dst, src, size);
 	  }
 	  else if (dst_mreg == NULL) {
-	    ARMCII_Assert_msg(dst != NULL, "Invalid local address");
 	    { /* inlined gmr_get_typed(...) */
 	      gmr_t *gt_mreg = src_mreg;
 	      int grp_proc = target;
 	      gmr_size_t disp;
 	      MPI_Aint lb, extent;
-	      ARMCII_Assert(grp_proc >= 0);
-	      ARMCII_Assert_msg(gt_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
 	      if (src == MPI_BOTTOM) disp = 0;
 	      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
 	      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
-	      ARMCII_Assert_msg(disp >= 0 && disp < gt_mreg->slices[target].size, "Invalid remote address");
-	      ARMCII_Assert_msg(disp + size*extent <= gt_mreg->slices[target].size, "Transfer is out of range");
 	      if (ARMCII_GLOBAL_STATE.rma_atomicity)
 	        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, grp_proc,
 	                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);
@@ -1123,28 +1017,20 @@ void test_vector_acc()
 	        MPI_Get(dst, size, MPI_BYTE, grp_proc, (MPI_Aint) disp, size, MPI_BYTE, gt_mreg->window);
 	    }
 	    { /* inlined gmr_flush(src_mreg, target, 0) -> full flush */
-	      ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
-	      ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-	      ARMCII_Assert_msg(target < src_mreg->group.size, "grp_proc exceeds group size!");
 	      MPI_Win_flush(target, src_mreg->window);
 	    }
 	  }
 	  else {
 	    void *dst_buf;
 	    MPI_Alloc_mem(size, MPI_INFO_NULL, &dst_buf);
-	    ARMCII_Assert(dst_buf != NULL);
 	    { /* inlined gmr_get_typed(...) */
 	      gmr_t *gt_mreg = src_mreg;
 	      int grp_proc = target;
 	      gmr_size_t disp;
 	      MPI_Aint lb, extent;
-	      ARMCII_Assert(grp_proc >= 0);
-	      ARMCII_Assert_msg(gt_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
 	      if (src == MPI_BOTTOM) disp = 0;
 	      else disp = (gmr_size_t)((uint8_t*)src - (uint8_t*)gt_mreg->slices[target].base);
 	      MPI_Type_get_true_extent(MPI_BYTE, &lb, &extent);
-	      ARMCII_Assert_msg(disp >= 0 && disp < gt_mreg->slices[target].size, "Invalid remote address");
-	      ARMCII_Assert_msg(disp + size*extent <= gt_mreg->slices[target].size, "Transfer is out of range");
 	      if (ARMCII_GLOBAL_STATE.rma_atomicity)
 	        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst_buf, size, MPI_BYTE, grp_proc,
 	                           (MPI_Aint) disp, size, MPI_BYTE, MPI_NO_OP, gt_mreg->window);
@@ -1152,9 +1038,6 @@ void test_vector_acc()
 	        MPI_Get(dst_buf, size, MPI_BYTE, grp_proc, (MPI_Aint) disp, size, MPI_BYTE, gt_mreg->window);
 	    }
 	    { /* inlined gmr_flush(src_mreg, target, 0) -> full flush */
-	      ARMCII_Assert(target >= 0 && ARMCI_GROUP_WORLD.rank >= 0);
-	      ARMCII_Assert_msg(src_mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
-	      ARMCII_Assert_msg(target < src_mreg->group.size, "grp_proc exceeds group size!");
 	      MPI_Win_flush(target, src_mreg->window);
 	    }
 	    memmove(dst, dst_buf, size);
@@ -1390,7 +1273,6 @@ int main(int argc, char **argv)
               void *lk_ptr = (search_base); int lk_proc = (search_proc_out);
               gmr_t *m = gmr_list;
               while (m != NULL) {
-                ARMCII_Assert(lk_proc < m->nslices);
                 if (lk_proc < m->nslices) {
                   const uint8_t   *base = m->slices[lk_proc].base;
                   const gmr_size_t sz   = m->slices[lk_proc].size;
@@ -1400,16 +1282,13 @@ int main(int argc, char **argv)
               }
               mreg = m;
             }
-            ARMCII_Assert_msg(mreg != NULL, "Could not locate the desired allocation");
             if (mreg->prev == NULL) {
-              ARMCII_Assert(gmr_list == mreg);
               gmr_list = mreg->next;
               if (mreg->next != NULL) mreg->next->prev = NULL;
             } else {
               mreg->prev->next = mreg->next;
               if (mreg->next != NULL) mreg->next->prev = mreg->prev;
             }
-            ARMCII_Assert_msg(mreg->window != MPI_WIN_NULL, "A non-null mreg contains a null window.");
             MPI_Win_unlock_all(mreg->window);
             MPI_Win_free(&mreg->window);
             if (ARMCII_GLOBAL_STATE.use_win_allocate == 0) {
