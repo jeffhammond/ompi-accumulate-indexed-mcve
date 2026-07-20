@@ -1,0 +1,23 @@
+Open MPI: 5.0.10rc2
+Ranks: 4 (2 ranks per node on 2 nodes)
+Transport: UCX rc_x,sm,self
+Device: mlx5_0:1
+Build: mpicc -DUSE_MPI_DOUBLE -O2 vacc_mcve.c -o vacc-mpi-double -lm
+
+Iris:
+run 1: OK
+run 2: OK
+run 3: OK
+Iris summary: OK=3 CORRUPT=0 other=0
+
+Thor:
+run 1: OK
+run 2: OK
+run 3: OK
+summary: OK=3 CORRUPT=0 other=0
+
+Rome (rdma-core-compatible UCX preload):
+run 1: OK
+run 2: OK
+run 3: OK
+summary: OK=3 CORRUPT=0 other=0

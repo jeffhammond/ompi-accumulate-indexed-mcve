@@ -1,0 +1,23 @@
+Open MPI: 5.0.10rc2
+Ranks: 4 (2 ranks per node on 2 nodes)
+Transport: UCX rc_x,sm,self
+Device: mlx5_0:1
+Build: mpicc -O2 vacc_mcve.c -o vacc-indexed -lm
+
+Iris:
+run 1: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+run 2: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+run 3: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+summary: OK=0 CORRUPT=3 other=0
+
+Thor:
+run 1: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+run 2: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+run 3: CORRUPT  ERROR: a [3] (proc=0):320.000000 b [3] 0.000000
+summary: OK=0 CORRUPT=3 other=0
+
+Rome (rdma-core-compatible UCX preload):
+run 1: CORRUPT  ERROR: a [3] (proc=1):320.000000 b [3] 0.000000
+run 2: CORRUPT  ERROR: a [3] (proc=1):320.000000 b [3] 0.000000
+run 3: CORRUPT  ERROR: a [3] (proc=1):320.000000 b [3] 0.000000
+summary: OK=0 CORRUPT=3 other=0

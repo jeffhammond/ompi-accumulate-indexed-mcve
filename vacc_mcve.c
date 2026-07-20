@@ -1,11 +1,10 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include <math.h>
 #include <unistd.h>
 
 #include <mpi.h>
 
 #define MAX(A,B) (((A) > (B)) ? A : B)
-#define ABS(a) (((a) <0) ? -(a) : (a))
 
 int main(int argc, char **argv)
 {
@@ -15,18 +14,18 @@ int main(int argc, char **argv)
     MPI_Comm_size(MPI_COMM_WORLD, &world_np);
     if (world_me == 0) printf("standalone test_vector_acc: %d procs\n", world_np);
 
-    const int bytes = (int)sizeof(double)*500;
+    const MPI_Aint bytes = (MPI_Aint)sizeof(double)*500;
+    static double a[500], c[500];
     double *b;
     MPI_Win window = MPI_WIN_NULL;
 
-    MPI_Win_allocate((MPI_Aint)bytes, 1, MPI_INFO_NULL, MPI_COMM_WORLD,
+    MPI_Win_allocate(bytes, 1, MPI_INFO_NULL, MPI_COMM_WORLD,
                      &b, &window);
     MPI_Win_lock_all(MPI_MODE_NOCHECK, window);
-    double * const a = malloc(bytes);
-    double * const c = malloc(bytes);
 
     for (int i = 0; i < 500; i++) {
         a[i] = i;
+        b[i] = 0.;
     }
 
     if(world_me==0){
@@ -34,8 +33,6 @@ int main(int argc, char **argv)
         printf("]--------\n");
         fflush(stdout);
     }
-
-    for (int i=0;i<500;i++) b[i]=0.;
 
     MPI_Barrier(MPI_COMM_WORLD);
     for (int i=0;i<100*world_np;i++){
@@ -81,7 +78,7 @@ int main(int argc, char **argv)
     MPI_Win_flush_all(window);
     MPI_Barrier(MPI_COMM_WORLD);
 
-    MPI_Get(c, bytes, MPI_BYTE, 0, 0, bytes, MPI_BYTE, window);
+    MPI_Get(c, (int)bytes, MPI_BYTE, 0, 0, (int)bytes, MPI_BYTE, window);
     MPI_Win_flush(0, window);
 
     const double scale = 10.0*world_np*world_np;
@@ -89,10 +86,10 @@ int main(int argc, char **argv)
 
     for (int i = 0; i < 500; i++) {
         const double diff = a[i] - c[i];
-        double max = MAX(ABS(a[i]),ABS(c[i]));
+        double max = MAX(fabs(a[i]),fabs(c[i]));
         if(max == 0. || max < .0001) max = 1.;
 
-        if(.0001 < ABS(diff)/max){
+        if(.0001 < fabs(diff)/max){
             char msg[48];
             sprintf(msg,"(proc=%d):%f",world_me,a[i]);
             printf("ERROR: a [%d] %s", i+1, msg);
@@ -113,11 +110,9 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    free(c);
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Win_unlock_all(window);
     MPI_Win_free(&window);
-    free(a);
     MPI_Barrier(MPI_COMM_WORLD);
     if (world_me == 0) printf("DONE OK\n");
     MPI_Finalize();
