@@ -9,13 +9,6 @@
 #define MAX(A,B) (((A) > (B)) ? A : B)
 #define ABS(a) (((a) <0) ? -(a) : (a))
 
-typedef struct {
-    void **src_ptr_array;
-    void **dst_ptr_array;
-    int    bytes;
-    int    ptr_array_len;
-} armci_giov_t;
-
 typedef struct gmr_s {
     void **slices;
 } gmr_t;
@@ -89,161 +82,133 @@ static void test_vector_acc(void)
 
     sleep(1);
 
-    const int proc = 0;
-    const double alpha = 0.1;
-    armci_giov_t dsc = {
-        .src_ptr_array = (void *[250]){0},
-        .dst_ptr_array = (void *[250]){0},
-        .bytes = sizeof(double),
-        .ptr_array_len = 250
-    };
+    void *src_ptr_array[250];
+    void *dst_ptr_array[250];
     MPI_Barrier(MPI_COMM_WORLD);
     for (int i=0;i<100*world_np;i++){
         for (int j=0; j<250; j++){
-            dsc.src_ptr_array[j]= 2*j + a;
-            dsc.dst_ptr_array[j]= 2*j + b[proc];
+            src_ptr_array[j]= 2*j + a;
+            dst_ptr_array[j]= 2*j + b[0];
         }
         {
-            armci_giov_t * const iov = &dsc;
             {
-                void ** const orig_bufs = iov[0].src_ptr_array;
-                const int count = iov[0].ptr_array_len;
-                const int size = iov[0].bytes;
-                void ** const src_buf = malloc((count+1)*sizeof(void*));
+                void ** const src_buf = malloc(251*sizeof(void*));
                 char *contig;
-                MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                src_buf[count] = contig;
+                MPI_Alloc_mem((MPI_Aint)250*sizeof(double), MPI_INFO_NULL, &contig);
+                src_buf[250] = contig;
 
-                for (int i = 0; i < count; i++) {
-                    src_buf[i] = contig + (MPI_Aint)i*size;
+                for (int i = 0; i < 250; i++) {
+                    src_buf[i] = contig + (MPI_Aint)i*sizeof(double);
                     {
-                        const int nelem = size / (int)sizeof(double);
-                        double * const s_in = (double*) orig_bufs[i];
+                        double * const s_in = (double*) src_ptr_array[i];
                         double * const s_out = (double*) src_buf[i];
-                        const double s = alpha;
-                        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
+                        s_out[0] = s_in[0] * 0.1;
                     }
                 }
 
                 {
-                    const int elem_count = iov[0].bytes/(int)sizeof(double);
-
-                    void ** const buf_rem = iov[0].dst_ptr_array;
-                    void ** const buf_loc = src_buf;
-
                     MPI_Datatype  type_loc, type_rem;
-                    int           disp_loc[count];
-                    int           disp_rem[count];
-                    MPI_Aint      loc_addr[count];
+                    int           disp_loc[250];
+                    int           disp_rem[250];
+                    MPI_Aint      loc_addr[250];
                     MPI_Aint      base_loc;
                     MPI_Aint      base_rem;
 
-                    MPI_Get_address(mreg->slices[proc], &base_rem);
+                    MPI_Get_address(mreg->slices[0], &base_rem);
 
-                    void *base_loc_ptr = buf_loc[0];
-                    MPI_Get_address(buf_loc[0], &base_loc);
-                    for (int i = 0; i < count; i++) {
-                        MPI_Get_address(buf_loc[i], &loc_addr[i]);
-                        if (loc_addr[i] < base_loc) { base_loc = loc_addr[i]; base_loc_ptr = buf_loc[i]; }
+                    void *base_loc_ptr = src_buf[0];
+                    MPI_Get_address(src_buf[0], &base_loc);
+                    for (int i = 0; i < 250; i++) {
+                        MPI_Get_address(src_buf[i], &loc_addr[i]);
+                        if (loc_addr[i] < base_loc) { base_loc = loc_addr[i]; base_loc_ptr = src_buf[i]; }
                     }
 
-                    for (int i = 0; i < count; i++) {
+                    for (int i = 0; i < 250; i++) {
                         MPI_Aint target_rem;
-                        MPI_Get_address(buf_rem[i], &target_rem);
+                        MPI_Get_address(dst_ptr_array[i], &target_rem);
                         disp_rem[i]  = (int)((target_rem - base_rem)/(MPI_Aint)sizeof(double));
 
                         disp_loc[i]  = (int)((loc_addr[i] - base_loc)/(MPI_Aint)sizeof(double));
                     }
 
-                    for (int start = 0; start < count; start++) {
-                        MPI_Type_create_indexed_block(1, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
-                        MPI_Type_create_indexed_block(1, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
+                    for (int start = 0; start < 250; start++) {
+                        MPI_Type_create_indexed_block(1, 1, &disp_loc[start], MPI_DOUBLE, &type_loc);
+                        MPI_Type_create_indexed_block(1, 1, &disp_rem[start], MPI_DOUBLE, &type_rem);
                         MPI_Type_commit(&type_loc);
                         MPI_Type_commit(&type_rem);
 
-                        MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
+                        MPI_Accumulate(base_loc_ptr, 1, type_loc, 0, 0, 1, type_rem, MPI_SUM, window);
 
                         MPI_Type_free(&type_loc);
                         MPI_Type_free(&type_rem);
                     }
-                    MPI_Win_flush_local(proc, window);
+                    MPI_Win_flush_local(0, window);
                 }
 
-                MPI_Free_mem(src_buf[count]);
+                MPI_Free_mem(src_buf[250]);
                 free(src_buf);
             }
         }
         for (int j=0; j<250; j++){
-            dsc.src_ptr_array[j]= 2*j+1 + a;
-            dsc.dst_ptr_array[j]= 2*j+1 + b[proc];
+            src_ptr_array[j]= 2*j+1 + a;
+            dst_ptr_array[j]= 2*j+1 + b[0];
         }
         {
-            armci_giov_t * const iov = &dsc;
             {
-                void ** const orig_bufs = iov[0].src_ptr_array;
-                const int count = iov[0].ptr_array_len;
-                const int size = iov[0].bytes;
-                void ** const src_buf = malloc((count+1)*sizeof(void*));
+                void ** const src_buf = malloc(251*sizeof(void*));
                 char *contig;
-                MPI_Alloc_mem((MPI_Aint)count*size, MPI_INFO_NULL, &contig);
-                src_buf[count] = contig;
+                MPI_Alloc_mem((MPI_Aint)250*sizeof(double), MPI_INFO_NULL, &contig);
+                src_buf[250] = contig;
 
-                for (int i = 0; i < count; i++) {
-                    src_buf[i] = contig + (MPI_Aint)i*size;
+                for (int i = 0; i < 250; i++) {
+                    src_buf[i] = contig + (MPI_Aint)i*sizeof(double);
                     {
-                        const int nelem = size / (int)sizeof(double);
-                        double * const s_in = (double*) orig_bufs[i];
+                        double * const s_in = (double*) src_ptr_array[i];
                         double * const s_out = (double*) src_buf[i];
-                        const double s = alpha;
-                        for (int k = 0; k < nelem; k++) s_out[k] = s_in[k] * s;
+                        s_out[0] = s_in[0] * 0.1;
                     }
                 }
 
                 {
-                    const int elem_count = iov[0].bytes/(int)sizeof(double);
-
-                    void ** const buf_rem = iov[0].dst_ptr_array;
-                    void ** const buf_loc = src_buf;
-
                     MPI_Datatype  type_loc, type_rem;
-                    int           disp_loc[count];
-                    int           disp_rem[count];
-                    MPI_Aint      loc_addr[count];
+                    int           disp_loc[250];
+                    int           disp_rem[250];
+                    MPI_Aint      loc_addr[250];
                     MPI_Aint      base_loc;
                     MPI_Aint      base_rem;
 
-                    MPI_Get_address(mreg->slices[proc], &base_rem);
+                    MPI_Get_address(mreg->slices[0], &base_rem);
 
-                    void *base_loc_ptr = buf_loc[0];
-                    MPI_Get_address(buf_loc[0], &base_loc);
-                    for (int i = 0; i < count; i++) {
-                        MPI_Get_address(buf_loc[i], &loc_addr[i]);
-                        if (loc_addr[i] < base_loc) { base_loc = loc_addr[i]; base_loc_ptr = buf_loc[i]; }
+                    void *base_loc_ptr = src_buf[0];
+                    MPI_Get_address(src_buf[0], &base_loc);
+                    for (int i = 0; i < 250; i++) {
+                        MPI_Get_address(src_buf[i], &loc_addr[i]);
+                        if (loc_addr[i] < base_loc) { base_loc = loc_addr[i]; base_loc_ptr = src_buf[i]; }
                     }
 
-                    for (int i = 0; i < count; i++) {
+                    for (int i = 0; i < 250; i++) {
                         MPI_Aint target_rem;
-                        MPI_Get_address(buf_rem[i], &target_rem);
+                        MPI_Get_address(dst_ptr_array[i], &target_rem);
                         disp_rem[i]  = (int)((target_rem - base_rem)/(MPI_Aint)sizeof(double));
 
                         disp_loc[i]  = (int)((loc_addr[i] - base_loc)/(MPI_Aint)sizeof(double));
                     }
 
-                    for (int start = 0; start < count; start++) {
-                        MPI_Type_create_indexed_block(1, elem_count, &disp_loc[start], MPI_DOUBLE, &type_loc);
-                        MPI_Type_create_indexed_block(1, elem_count, &disp_rem[start], MPI_DOUBLE, &type_rem);
+                    for (int start = 0; start < 250; start++) {
+                        MPI_Type_create_indexed_block(1, 1, &disp_loc[start], MPI_DOUBLE, &type_loc);
+                        MPI_Type_create_indexed_block(1, 1, &disp_rem[start], MPI_DOUBLE, &type_rem);
                         MPI_Type_commit(&type_loc);
                         MPI_Type_commit(&type_rem);
 
-                        MPI_Accumulate(base_loc_ptr, 1, type_loc, proc, 0, 1, type_rem, MPI_SUM, window);
+                        MPI_Accumulate(base_loc_ptr, 1, type_loc, 0, 0, 1, type_rem, MPI_SUM, window);
 
                         MPI_Type_free(&type_loc);
                         MPI_Type_free(&type_rem);
                     }
-                    MPI_Win_flush_local(proc, window);
+                    MPI_Win_flush_local(0, window);
                 }
 
-                MPI_Free_mem(src_buf[count]);
+                MPI_Free_mem(src_buf[250]);
                 free(src_buf);
             }
         }
@@ -253,17 +218,14 @@ static void test_vector_acc(void)
     MPI_Barrier(MPI_COMM_WORLD);
 
     {
-        void * const src = b[proc];
-        void * const dst = c;
-        const int size = bytes;
-        const int target = proc;
-        const MPI_Aint disp = (MPI_Aint)((uint8_t*)src -
-                                        (uint8_t*)mreg->slices[target]);
-        MPI_Get_accumulate(NULL, 0, MPI_BYTE, dst, size, MPI_BYTE, target, disp, size, MPI_BYTE, MPI_NO_OP, window);
-        MPI_Win_flush(target, window);
+        const MPI_Aint disp = (MPI_Aint)((uint8_t*)b[0] -
+                                        (uint8_t*)mreg->slices[0]);
+        MPI_Get_accumulate(NULL, 0, MPI_BYTE, c, bytes, MPI_BYTE, 0,
+                           disp, bytes, MPI_BYTE, MPI_NO_OP, window);
+        MPI_Win_flush(0, window);
     }
 
-    const double scale = alpha*100*world_np*world_np;
+    const double scale = 10.0*world_np*world_np;
     for (int i = 0; i < 500; i++) a[i] *= scale;
 
     for (int i = 0; i < 500; i++) {
